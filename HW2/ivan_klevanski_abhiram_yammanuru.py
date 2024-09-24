@@ -22,9 +22,24 @@ from scipy import stats
 abs_path = os.path.dirname(os.path.abspath(__file__))
 
 
+def init_dataset():
+    """
+    Loads the dataset from csv
+
+    **Returns**: Pandas DataFrame for dataset and Metadata
+    """
+
+    df = pd.read_csv(os.path.join(abs_path, "Base.csv"))
+    mdata = df.dtypes
+    return df, mdata
 
 
 def main():
+
+    df, metadata = init_dataset()
+
+    # TODO: Tasks 1-6
+
     pass
 
 
