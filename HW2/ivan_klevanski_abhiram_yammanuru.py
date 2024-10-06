@@ -37,6 +37,9 @@ plot_fraud_to_feature = False
 plot_base_eda = False
 plot_cm = True
 
+# Multithreading
+n_jobs = 5
+
 def init_dataset():
     """
     Loads the dataset from csv
@@ -104,8 +107,6 @@ def data_preprocessing(df: pd.DataFrame):
     feat_df_fit["fraud_bool"] = label_df_fit
 
     df = feat_df_fit.sample(frac=1).reset_index(drop=True)
-
-    # TODO: maybe also add SMOTE for some oversampling
 
     # Other preprocessing
 
@@ -235,55 +236,88 @@ def evaluate_model(y, y_hat, name: str, print_cm: bool):
 
 def model_decision_tree(df: pd.DataFrame):
     """
-    TODO: Implement K-fold CV
+    Decision Tree model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
     """
+
     print("======Decision Tree======")
 
     feat_df = df.drop(columns=["fraud_bool"])
+
+    k = 5
+    model = sk_t.DecisionTreeClassifier()
+    params = {"criterion": ("gini", "entropy", "log_loss"), 
+              "splitter": ("best", "random")}
+
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
 
-    clf = sk_t.DecisionTreeClassifier()
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
     clf.fit(X=X_train, y=y_train)
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "Decision Tree", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
     print("Done.")
 
 
 def model_random_forest(df: pd.DataFrame):
     """
-    TODO: Implement K-fold CV
+    Random Forest model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
     """
+
     print("======Random Forest======")
 
     feat_df = df.drop(columns=["fraud_bool"])
+
+    k = 5
+    model = sk_e.RandomForestClassifier()
+    params = {"criterion": ("gini", "entropy", "log_loss"), 
+              "max_features": ("sqrt", "log2")}
+
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
 
-    clf = sk_e.RandomForestClassifier()
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
     clf.fit(X=X_train, y=y_train)
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "Random Forest", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
     print("Done.")
 
 
 def model_xgboost(df: pd.DataFrame):
     """
-    TODO: Implement K-fold CV
+    XGBoost model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
     """
+
     print("======XGBoost======")
 
     feat_df = df.drop(columns=["fraud_bool"])
+
+    k = 5
+    model = xgb.XGBClassifier()
+    params = {"sampling_method": ("uniform", "subsample", "gradient_based"), 
+              "eta": np.arange(0.5, 1.1, 0.1).tolist()}
+
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
 
-    clf = xgb.XGBClassifier()
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
     clf.fit(X=X_train, y=y_train)
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "XGBoost", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
     print("Done.")
 
 
