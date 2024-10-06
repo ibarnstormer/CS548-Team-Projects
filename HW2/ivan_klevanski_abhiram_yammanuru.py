@@ -23,13 +23,10 @@ import sklearn.linear_model as sk_lm
 import sklearn.metrics as sk_m
 import sklearn.model_selection as sk_ms
 import sklearn.neighbors as sk_n
-import sklearn.pipeline as sk_p
 import sklearn.preprocessing as sk_pp
 import sklearn.tree as sk_t
 import warnings
 import xgboost as xgb
-
-from scipy import stats
 
 warnings.filterwarnings("ignore")
 
