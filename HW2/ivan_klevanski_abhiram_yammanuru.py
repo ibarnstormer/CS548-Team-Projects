@@ -37,6 +37,9 @@ plot_fraud_to_feature = False
 plot_base_eda = False
 plot_cm = True
 
+# Miscellaneous globals
+k = 5 # K-Fold Cross Validation
+
 # Multithreading
 n_jobs = 5
 
@@ -234,18 +237,18 @@ def evaluate_model(y, y_hat, name: str, print_cm: bool):
     print("{}: Accuracy: {:.4f}, Precision: {:.4f}, Recall: {:.4f}, F1-Score: {:.4f}, MCC: {:.4f}".format(name, acc, p, r, f1, mcc))
 
 
-def model_decision_tree(df: pd.DataFrame):
+def model_decision_tree(df: pd.DataFrame, k: int = k):
     """
     Decision Tree model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
 
     **df**: dataset dataframe
+    **k**: number of folds for cross validation
     """
 
     print("======Decision Tree======")
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    k = 5
     model = sk_t.DecisionTreeClassifier()
     params = {"criterion": ("gini", "entropy", "log_loss"), 
               "splitter": ("best", "random")}
@@ -263,18 +266,18 @@ def model_decision_tree(df: pd.DataFrame):
     print("Done.")
 
 
-def model_random_forest(df: pd.DataFrame):
+def model_random_forest(df: pd.DataFrame, k: int = k):
     """
     Random Forest model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
 
     **df**: dataset dataframe
+    **k**: number of folds for cross validation
     """
 
     print("======Random Forest======")
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    k = 5
     model = sk_e.RandomForestClassifier()
     params = {"criterion": ("gini", "entropy", "log_loss"), 
               "max_features": ("sqrt", "log2")}
@@ -292,21 +295,21 @@ def model_random_forest(df: pd.DataFrame):
     print("Done.")
 
 
-def model_xgboost(df: pd.DataFrame):
+def model_xgboost(df: pd.DataFrame, k: int = k):
     """
     XGBoost model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
 
     **df**: dataset dataframe
+    **k**: number of folds for cross validation
     """
 
     print("======XGBoost======")
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    k = 5
     model = xgb.XGBClassifier()
     params = {"sampling_method": ("uniform", "subsample", "gradient_based"), 
-              "eta": np.arange(0.5, 1.1, 0.1).tolist()}
+              "eta": np.arange(0.1, 1.1, 0.1).tolist()}
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
 
