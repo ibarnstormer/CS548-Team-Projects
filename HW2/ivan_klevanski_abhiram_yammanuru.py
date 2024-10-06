@@ -467,8 +467,11 @@ def main():
 
     # Model training
 
+    model_logistic_regression(df)
+    model_knn(df)
     model_random_forest(df)
     model_decision_tree(df)
+    model_adaboost(df)
     model_xgboost(df)
 
     pass
