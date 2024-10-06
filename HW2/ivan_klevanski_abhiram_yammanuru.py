@@ -17,9 +17,12 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 import imblearn.under_sampling as im_us
+import sklearn.discriminant_analysis as sk_da
 import sklearn.ensemble as sk_e
+import sklearn.linear_model as sk_lm
 import sklearn.metrics as sk_m
 import sklearn.model_selection as sk_ms
+import sklearn.neighbors as sk_n
 import sklearn.pipeline as sk_p
 import sklearn.preprocessing as sk_pp
 import sklearn.tree as sk_t
@@ -44,6 +47,7 @@ random = 42 # Random State
 # Multithreading
 n_jobs = 5
 
+
 def init_dataset():
     """
     Loads the dataset from csv
@@ -54,6 +58,7 @@ def init_dataset():
     df = pd.read_csv(os.path.join(abs_path, "Base.csv"))
     mdata = df.dtypes
     return df, mdata
+
 
 def dataset_description(df: pd.DataFrame, metadata):
     """
@@ -84,7 +89,10 @@ def dataset_description(df: pd.DataFrame, metadata):
 
 def data_preprocessing(df: pd.DataFrame):
     """
-    Preprocesses the dataset's features 
+    Preprocesses the dataset's features
+
+    Note: not all models (parametric) directly benefit from standard scaling so we apply to those that do in model methods
+        -> Logistic Regression
     """
 
     print("======Data Preprocessing======")
@@ -112,11 +120,8 @@ def data_preprocessing(df: pd.DataFrame):
 
     df = feat_df_fit.sample(frac=1).reset_index(drop=True)
 
-    # Other preprocessing
-
     print("Done.")
     return df
-
 
 
 def EDA(df: pd.DataFrame):
@@ -209,6 +214,7 @@ def EDA(df: pd.DataFrame):
     df.drop(columns=["device_fraud_count"], inplace=True)
     print("Done.")
 
+
 def evaluate_model(y, y_hat, name: str, print_cm: bool):
     """
     Computes various model evaluation metrics
@@ -238,6 +244,79 @@ def evaluate_model(y, y_hat, name: str, print_cm: bool):
     print("{}: Accuracy: {:.4f}, Precision: {:.4f}, Recall: {:.4f}, F1-Score: {:.4f}, MCC: {:.4f}".format(name, acc, p, r, f1, mcc))
 
 
+def model_logistic_regression(df: pd.DataFrame, k: int = k):
+    """
+    Logistic Regression model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
+    **k**: number of folds for cross validation
+    """
+
+    print("======Logistic Regression======")
+
+    feat_df = df.drop(columns=["fraud_bool"])
+
+    model = sk_lm.LogisticRegression(random_state=random)
+    params = {"penalty": ("None", "l2", "l1", "elasticnet"), 
+              "C": np.arange(0.1, 1.1, 0.1).tolist()}
+    
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
+
+    # Scale Features
+    scaler = sk_da.StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+
+    clf.fit(X=X_train_scaled, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
+    y_pred = clf.predict(X_test_scaled)
+
+    evaluate_model(y_test, y_pred, "Logistic Regression", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
+    print("Done.")
+
+
+def model_knn(df: pd.DataFrame, k: int = k):
+    """
+    K Nearest Neighbors model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
+    **k**: number of folds for cross validation
+    """
+
+    print("======K Nearest Neighbors======")
+
+    feat_df = df.drop(columns=["fraud_bool"])
+
+    model = sk_n.KNeighborsClassifier(random_state=random)
+    params = {"algorithm": ("auto", "ball_tree", "kd_tree", "brute"), 
+              "n_neighbors": np.arange(1, 9, 2).tolist()}
+    
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
+
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+
+    clf.fit(X=X_train, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
+    y_pred = clf.predict(X_test)
+
+    evaluate_model(y_test, y_pred, "K Nearest Neighbors", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
+    print("Done.")
+
+
 def model_decision_tree(df: pd.DataFrame, k: int = k):
     """
     Decision Tree model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
@@ -256,9 +335,14 @@ def model_decision_tree(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "Decision Tree", plot_cm)
@@ -285,12 +369,51 @@ def model_random_forest(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "Random Forest", plot_cm)
+    print("Best parameters: {}".format(clf.best_params_))
+
+    print("Done.")
+
+
+def model_adaboost(df: pd.DataFrame, k: int = k):
+    """
+    AdaBoost model with 5-fold cross validation and hyperparameter tuning via GridSearchCV
+
+    **df**: dataset dataframe
+    **k**: number of folds for cross validation
+    """
+
+    print("======AdaBoost======")
+
+    feat_df = df.drop(columns=["fraud_bool"])
+
+    model = sk_e.AdaBoostClassifier(random_state=random)
+    params = {"algorithm": ("SAMME", "SAMME.R"), 
+              "learning_rate": np.arange(0.1, 1.1, 0.1).tolist()}
+
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
+
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+
+    clf.fit(X=X_train, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
+    y_pred = clf.predict(X_test)
+
+    evaluate_model(y_test, y_pred, "AdaBoost", plot_cm)
     print("Best parameters: {}".format(clf.best_params_))
 
     print("Done.")
@@ -314,9 +437,14 @@ def model_xgboost(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
+
+    # Cross-validation recall scores
+    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
+    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+
     y_pred = clf.predict(X_test)
 
     evaluate_model(y_test, y_pred, "XGBoost", plot_cm)
