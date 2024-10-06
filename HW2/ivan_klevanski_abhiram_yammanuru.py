@@ -43,6 +43,7 @@ plot_cm = True
 # Miscellaneous globals
 k = 5 # K-Fold Cross Validation
 random = 42 # Random State
+cv_verbosity = 3 # Verbosity of GridSearchCV (1 lowest, 3 highest)
 
 # Multithreading
 n_jobs = 5
@@ -257,7 +258,7 @@ def model_logistic_regression(df: pd.DataFrame, k: int = k):
     feat_df = df.drop(columns=["fraud_bool"])
 
     model = sk_lm.LogisticRegression(random_state=random)
-    params = {"penalty": ("None", "l2", "l1", "elasticnet"), 
+    params = {"solver": ("lbfgs", "liblinear", "newton-cg", "newton-cholesky", "sag", "saga"), 
               "C": np.arange(0.1, 1.1, 0.1).tolist()}
     
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
@@ -267,12 +268,11 @@ def model_logistic_regression(df: pd.DataFrame, k: int = k):
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train_scaled, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
     print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test_scaled)
@@ -295,19 +295,18 @@ def model_knn(df: pd.DataFrame, k: int = k):
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    model = sk_n.KNeighborsClassifier(random_state=random)
+    model = sk_n.KNeighborsClassifier()
     params = {"algorithm": ("auto", "ball_tree", "kd_tree", "brute"), 
               "n_neighbors": np.arange(1, 9, 2).tolist()}
     
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
-    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+    print("K Nearest Neighbors Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test)
 
@@ -335,13 +334,12 @@ def model_decision_tree(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
-    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+    print("Decision Tree Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test)
 
@@ -369,13 +367,12 @@ def model_random_forest(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
-    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+    print("Random Forest Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test)
 
@@ -403,13 +400,12 @@ def model_adaboost(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
-    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+    print("AdaBoost Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test)
 
@@ -437,13 +433,12 @@ def model_xgboost(df: pd.DataFrame, k: int = k):
 
     X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
-    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs, scoring="recall")
+    clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=cv_verbosity, n_jobs=n_jobs, scoring="recall")
 
     clf.fit(X=X_train, y=y_train)
 
     # Cross-validation recall scores
-    print("Logistic Regression Mean training recall:", clf.cv_results_["mean_train_score"].mean())
-    print("Logistic Regression Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
+    print("XGBoost Mean testing recall:", clf.cv_results_["mean_test_score"].mean())
 
     y_pred = clf.predict(X_test)
 
