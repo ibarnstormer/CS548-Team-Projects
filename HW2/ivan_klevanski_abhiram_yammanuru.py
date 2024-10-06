@@ -39,6 +39,7 @@ plot_cm = True
 
 # Miscellaneous globals
 k = 5 # K-Fold Cross Validation
+random = 42 # Random State
 
 # Multithreading
 n_jobs = 5
@@ -249,11 +250,11 @@ def model_decision_tree(df: pd.DataFrame, k: int = k):
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    model = sk_t.DecisionTreeClassifier()
+    model = sk_t.DecisionTreeClassifier(random_state=random)
     params = {"criterion": ("gini", "entropy", "log_loss"), 
               "splitter": ("best", "random")}
 
-    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
     clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
@@ -278,11 +279,11 @@ def model_random_forest(df: pd.DataFrame, k: int = k):
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    model = sk_e.RandomForestClassifier()
+    model = sk_e.RandomForestClassifier(random_state=random)
     params = {"criterion": ("gini", "entropy", "log_loss"), 
               "max_features": ("sqrt", "log2")}
 
-    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
     clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
@@ -307,11 +308,11 @@ def model_xgboost(df: pd.DataFrame, k: int = k):
 
     feat_df = df.drop(columns=["fraud_bool"])
 
-    model = xgb.XGBClassifier()
-    params = {"sampling_method": ("uniform", "subsample", "gradient_based"), 
+    model = xgb.XGBClassifier(random_state=random)
+    params = {"tree_method": ("auto", "exact", "approx", "hist"), 
               "eta": np.arange(0.1, 1.1, 0.1).tolist()}
 
-    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2)
+    X_train, X_test, y_train, y_test = sk_ms.train_test_split(feat_df, df["fraud_bool"], train_size=0.8, test_size=0.2, random_state=random)
 
     clf = sk_ms.GridSearchCV(model, params, cv=k, verbose=3, n_jobs=n_jobs)
 
