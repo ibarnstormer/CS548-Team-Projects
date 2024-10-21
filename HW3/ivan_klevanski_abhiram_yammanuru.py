@@ -128,7 +128,6 @@ class CNNRegression(nn.Module):
         return x
 
 
-
 class RegressionModel(nn.Module):
     """
     Wrapper class that converts timm image classifier NN models<br>
@@ -145,6 +144,7 @@ class RegressionModel(nn.Module):
         x = self.linear(x)
 
         return x
+
 
 def setup():
     """
@@ -182,6 +182,7 @@ def train_model():
 
     pass
 
+
 def test_model():
     pass
 
@@ -192,9 +193,16 @@ def EDA():
     # TODO
     pass
 
+
 def data_preprocessing():
     # TODO: note: may not be necessary since most image augmentations will happen in dataset class
     pass
+
+
+def explainability():
+    # TODO
+    pass
+
 
 
 def main():
