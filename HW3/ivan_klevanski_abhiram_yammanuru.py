@@ -14,8 +14,13 @@ directory as the source file
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import copy
 import os
 import random
+import traceback
+import timm
+import sklearn.metrics as skl_m
+import sklearn.model_selection as skl_ms
 import torch.nn as nn
 import torch.cuda
 import albumentations
@@ -28,14 +33,17 @@ from timm import utils
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from timm.models import *
+from timm.models import resnet
 from lime import lime_image
+
+
+abs_path = os.path.dirname(os.path.abspath(__file__))
 
 # Params
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 seed = 42
-image_resize = 224
+image_resize = 48
 
 num_classes = 1000 # Models from timm use 1000 as default number of classes
 
@@ -47,11 +55,11 @@ class ImageDataSet(Dataset):
     """
 
     preprocessing = albumentations.Compose([
-        albumentations.Resize(width=image_resize, height=image_resize),
-        albumentations.Normalize(max_pixel_value=255, always_apply=True)
+        albumentations.Normalize(max_pixel_value=255, always_apply=True),
+        albumentations.pytorch.transforms.ToTensorV2()
     ])
 
-    def __init__(self, images, labels):
+    def __init__(self, images: list[str], labels: list):
         self.images = images
         self.labels = labels
 
@@ -59,39 +67,36 @@ class ImageDataSet(Dataset):
         return len(self.images)
 
     def __getitem__(self, item):
-        path = self.images[item]
 
-        # Convert to raw byte array
-        image = np.asarray(Image.open(path).convert("RGB"))
+        image = torch.from_numpy(np.asarray(self.images[item]).reshape(1, image_resize, image_resize))
 
-        # Preprocessing
-        image = self.preprocessing(image=image)["image"]
+        # Formating Images, preprocessing, and conversion to tensors
+        # image = self.preprocessing(image=image)["image"]
 
         # Format/adjust image
-        out_img = torch.from_numpy(image)
         label = self.labels[item]
-        return out_img, label
+        return image, label
 
 
 class CNNRegression(nn.Module):
     """
-    Generic Convolutional Neural Network for image regression tasks.<br>
+    Generic Convolutional Neural Network for image regression task.<br>
     Note: dim assumes that image is square
     """
 
     def __init__(self, dim, color_dim, dropout_p=0):
         super(CNNRegression, self).__init__()
 
-        fc1_dim = (((dim - 8) / 4) / 4) - 3 # dim - (conv1 kernel_size / conv1 stride) / (maxpool2 stride) - (conv3 kernel_size)
+        fc1_dim = int(((dim - 4) / 2) / 2) # dim - (conv1 kernel_size / conv1 stride) / (maxpool2 stride)
 
-        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=64, kernel_size=(8, 8), stride=4) # 224 -> 216 -> 54
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=192, kernel_size=(8, 8), stride=2, padding="same") # 54 -> 54 (same padding)
-        self.conv3 = nn.Conv2d(in_channels=192, out_channels=384, kernel_size=(3, 3), stride=1) # 9 -> 6
+        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=64, kernel_size=(4, 4), stride=2) # 48 -> 44 -> 22
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=192, kernel_size=(4, 4), stride=1, padding=2) # 22 -> 22 (same padding)
+        self.conv3 = nn.Conv2d(in_channels=192, out_channels=384, kernel_size=(3, 3), stride=1) # 11 -> 8 (11?)
 
-        self.maxpool = nn.MaxPool2d(kernel_size=(4, 4), stride=4, padding="same") # 54 -> 54 (same padding)
-        self.maxpool2 = nn.MaxPool2d(kernel_size=(4, 4), stride=4) # 54 -> 9
+        self.maxpool = nn.MaxPool2d(kernel_size=(2, 2), stride=1, padding=1) # 22 -> 22 (same padding)
+        self.maxpool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=2) # 22 -> 11
 
-        self.fc1 = nn.Linear(in_features=((fc1_dim ** 2) * 384), out_features=8192)
+        self.fc1 = nn.Linear(in_features=(fc1_dim ** 2) * 384, out_features=8192)
         self.fc2 = nn.Linear(in_features=8192, out_features=4096)
         self.fc3 = nn.Linear(in_features=4096, out_features=num_classes) # num_classes = 1000
         self.linear = nn.Linear(in_features=num_classes, out_features=1)
@@ -113,6 +118,8 @@ class CNNRegression(nn.Module):
         x = F.relu(x)
         x = self.maxpool(x)
         x = self.dropout(x)
+
+        x = torch.flatten(x, 1)
 
         x = self.fc1(x)
         x = self.dropout(x)
@@ -167,24 +174,187 @@ def setup():
     torch.manual_seed(seed)
 
 
-def train_model():
-    # TODO: Ivan
+def train_model(
+    model: nn.Module, 
+    train_loader: DataLoader, 
+    validation_loader: DataLoader,
+    loss_fn=nn.MSELoss(),
+    optim: torch.optim.Optimizer=torch.optim.Adam,
+    lr: float=1e-5,
+    num_epochs: int=10,
+    specifier="",
+    loss_str="MSE Loss",
+    optim_str="Adam"):
+    """
+    Trains the model via backpropagation
 
-    def train():
-        # TODO: Ivan
-        pass
+    """
+    
+    # Utility methods
 
-    def validate():
-        # TODO: Ivan
-        pass
+    def train(data_loader: DataLoader):
+        """
+        Single model training step
+        """
+
+        model.train()
+
+        run_loss = 0
+
+        # Mini-batch executions
+        for images, labels in tqdm(data_loader):
+            images = images.to(device)
+            labels = labels.to(device)
+
+            optimizer.zero_grad()
+
+            # Forward and backward pass to update model
+            with torch.set_grad_enabled(True):
+                outputs = model(images)
+                loss = loss_fn(outputs.squeeze().float(), labels.float())
+
+                loss.backward()
+                optimizer.step()
+
+            run_loss += loss.item() * images.size(0)
+
+        return run_loss / (len(data_loader) * data_loader.batch_size)
+
+    def validate(data_loader: DataLoader):
+        """
+        Single model validation step
+        """
+
+        model.eval()
+
+        run_loss = 0
+
+        # Mini-batch executions
+        for images, labels in tqdm(data_loader):
+            images = images.to(device)
+            labels = labels.to(device)
+
+            optimizer.zero_grad()
+
+            # Forward propagation to get predicted target variable
+            with torch.no_grad():
+                outputs = model(images)
+                loss = loss_fn(outputs.squeeze().float(), labels.float())
+
+            run_loss += loss.item() * images.size(0)
+
+        return run_loss / (len(data_loader) * data_loader.batch_size)
+
+    if model is not None:
+        try:
+            print('-' * 20)
+            print("Training: " + specifier)
+            print('-' * 20 + '\n')
+
+            # Initialization
+            optimizer=optim(model.parameters(), lr=lr)
+
+            m_best_weights = copy.deepcopy(model.state_dict())
+            m_best_loss = np.inf
+
+            model = model.to(device)
+
+            # Epochs
+            for epoch in range(num_epochs):
+
+                print('-' * 20)
+                print("Epoch: " + str(epoch + 1) + " out of " + str(num_epochs))
+                print('-' * 20)
+
+                epoch_loss = train(train_loader)
+                print("\nEpoch Summary: Train Loss: {:.4f}".format(epoch_loss))
+
+                epoch_loss = validate(validation_loader)
+                print("\nEpoch Summary: Evaluation Loss: {:.4f}".format(epoch_loss))
+
+                # Store best model weights based on lowest loss
+                if epoch_loss <= m_best_loss:
+                    m_best_loss = epoch_loss
+                    m_best_weights = copy.deepcopy(model.state_dict())
+
+            print("Lowest validation loss: {:.4f}".format(m_best_loss))
+            print("Parameters used: Learning Rate: {:.4f}, Number of Epochs: {}, Loss Function: {}, Optimizer: {}\n".format(lr, num_epochs, loss_str, optim_str))
+            return m_best_weights, m_best_loss
+        except Exception:
+            print("[Error]: %s training failed due to an exception, exiting...\n" % specifier)
+            print("[Error]: Exception occurred during training")
+            traceback.print_exc()
+            exit(1)
 
 
+def test_model(
+    model: nn.Module, 
+    test_loader: DataLoader, 
+    specifier=""):
 
+    if model is not None:
+        try:
+
+            print('-' * 20)
+            print("Testing: " + specifier)
+            print('-' * 20)
+
+            model.eval()
+
+            predictions = []
+            ground_truths = []
+
+            # Mini-batch executions
+            with torch.no_grad():
+                for images, labels in tqdm(test_loader):
+                    images = images.to(device)
+
+                    outputs = model(images)
+
+                    # If using batches, append output array to predictions instead of getting first item
+                    if outputs.size() == 1:
+                        predictions.append(outputs.item())
+                    else:
+                        predictions = predictions + outputs.cpu().detach().numpy().tolist()
+
+                    ground_truths.append(labels)
+
+                predictions = np.array(predictions)
+                ground_truths = np.array(torch.cat(ground_truths))
+
+            print("\n%s MSE: %.4f\n" % (specifier, skl_m.root_mean_squared_error(ground_truths, predictions) ** 2))
+            print("\n%s RMSE: %.4f\n" % (specifier, skl_m.root_mean_squared_error(ground_truths, predictions)))
+            print("\n%s MAE: %.4f\n" % (specifier, skl_m.mean_absolute_error(ground_truths, predictions)))
+            print("\n%s R-Squared: %.4f\n" % (specifier, skl_m.r2_score(ground_truths, predictions)))
+
+        except:
+            print("[Error]: Exception occurred during testing:\n")
+            traceback.print_exc()
     pass
 
 
-def test_model():
-    pass
+def load_data():
+    """
+    Loads and initializes all datasets<br>
+    **Returns**: dataframe and datasets for regression task
+    """
+
+    print("[Info]: Loading data. \n")
+    
+    df = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
+    df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
+    df["age"] = df["age"].astype(np.float32)
+
+    train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
+
+    train_df, validation_df = skl_ms.train_test_split(train_df, test_size=0.15)
+
+    train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["age"].tolist())
+    validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["age"].tolist())
+    test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["age"].tolist())
+
+    return df, train_set, validation_set, test_set
+
 
 
 # Other methods
@@ -208,6 +378,34 @@ def explainability():
 def main():
 
     setup()
+
+    df, train_set, validation_set, test_set = load_data()
+
+    batch_size = 32
+
+    train_loader = DataLoader(train_set, shuffle=True, batch_size=batch_size)
+    validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
+    test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
+
+    # ResNet Test
+
+    resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 3, 3, 3))) # ResNet18
+
+    train_model(model=resnet_model, train_loader=train_loader, validation_loader=validation_loader, specifier="ResNet18")
+
+    torch.save(resnet_model.state_dict(), "resnet18.pth")
+
+    test_model(model=resnet_model, test_loader=test_loader, specifier="ResNet18")
+
+    # CNN Test
+
+    cnn_model = CNNRegression(image_resize, 1, 0)
+
+    train_model(model=cnn_model, train_loader=train_loader, validation_loader=validation_loader, specifier="CNN")
+
+    torch.save(cnn_model.state_dict(), "cnn.pth")
+
+    test_model(model=cnn_model, test_loader=test_loader, specifier="CNN")
 
     pass
 
