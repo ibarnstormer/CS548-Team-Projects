@@ -13,6 +13,7 @@ directory as the source file
 
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 import copy
 import os
@@ -45,6 +46,8 @@ from lime import lime_image
 warnings.filterwarnings("ignore")
 
 abs_path = os.path.dirname(os.path.abspath(__file__))
+
+plot_graphs = True
 
 # Params
 
@@ -428,9 +431,54 @@ def visualize_image(ds: ImageDataSet, batch_size: int = 16, idx: int = 0):
 
 # Other methods
 
-def EDA():
-    # TODO
-    pass
+def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
+    """
+    Performs Exploratory Data Analysis (EDA) on the image dataset.
+    """
+
+    # Loading the Data
+    imageData = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
+
+    # Getting the shape of the data
+    imageData.head()
+    imageData.shape
+
+    if plot_graphs:
+
+        # Plotting the distribution of Age 
+        vcs = imageData['age'].value_counts()
+        vcs.plot(kind="bar")
+        for idx in vcs.index:
+            plt.text(idx, vcs[idx], vcs[idx], ha="center", va="center")
+        plt.show()
+
+        # Plotting the distribution of Gender 
+        vcs1 = imageData['gender'].value_counts()
+        vcs1.plot(kind="bar")
+        for idx in vcs1.index:
+            plt.text(idx, vcs1[idx], vcs1[idx], ha="center", va="center")
+        plt.show()
+
+        # Plotting the distribution of Ethnicity 
+        vcs2 = imageData['ethnicity'].value_counts()
+        vcs2.plot(kind="bar")
+        for idx in vcs2.index:
+            plt.text(idx, vcs2[idx], vcs2[idx], ha="center", va="center")
+
+        # Seeing the correlation between Age and Gender 
+        sns.scatterplot(x=imageData["age"], y=imageData["gender"])
+        plt.show()
+
+        # Seeing the correlation between Gender and Ethnicity 
+        sns.scatterplot(x=imageData["gender"], y=imageData["ethnicity"])
+        plt.show()
+            
+        # Seeing the corrlation between Age and Ethnicity
+        sns.scatterplot(x=imageData["age"], y=imageData["ethnicity"])
+        plt.show()
+
+        # Example of image mini-batch
+        visualize_image(ds)
 
 
 def data_preprocessing():
@@ -449,16 +497,19 @@ def main():
 
     df, train_set, validation_set, test_set = load_data()
 
-    batch_size = 32
+    EDA(df, train_set)
 
     losses_df = pd.DataFrame(columns=["Model_Name", "Training_Losses", "Validation_Losses"])
+
+    # Hyperparameters
+    batch_size = 32
+
 
     train_loader = DataLoader(train_set, shuffle=True, batch_size=batch_size)
     validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
     test_only = False # Whether or not to just run model tests or to train models as well
-    graph_loss = False
     save_loss = False
     
     train_mlp = False
@@ -466,6 +517,7 @@ def main():
     train_vgg = False
     train_resnet = False
     train_vit = False # Bad compared to CNNs
+
 
     # MLP
     if train_mlp:
@@ -547,7 +599,7 @@ def main():
 
         test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
 
-    if graph_loss:
+    if plot_graphs:
         graph_losses(losses_df)
 
     if save_loss:
