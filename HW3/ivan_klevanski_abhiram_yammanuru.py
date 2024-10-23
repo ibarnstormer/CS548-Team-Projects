@@ -84,39 +84,51 @@ class CNNRegression(nn.Module):
     Note: dim assumes that image is square
     """
 
-    def __init__(self, dim, color_dim, dropout_p=0):
+    def __init__(self, dim, color_dim, drop_rate=0, use_batch_norm=True):
         super(CNNRegression, self).__init__()
+
+        self.use_batch_norm = use_batch_norm
 
         fc1_dim = int(((dim - 4) / 2) / 2) # dim - (conv1 kernel_size / conv1 stride) / (maxpool2 stride)
 
-        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=64, kernel_size=(4, 4), stride=2) # 48 -> 44 -> 22
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=192, kernel_size=(4, 4), stride=1, padding=2) # 22 -> 22 (same padding)
-        self.conv3 = nn.Conv2d(in_channels=192, out_channels=384, kernel_size=(3, 3), stride=1) # 11 -> 8 (11?)
+        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=96, kernel_size=(4, 4), stride=2)
+        self.conv2 = nn.Conv2d(in_channels=96, out_channels=192, kernel_size=(4, 4), stride=1, padding=2)
+        self.conv3 = nn.Conv2d(in_channels=192, out_channels=384, kernel_size=(3, 3), stride=1)
 
-        self.maxpool = nn.MaxPool2d(kernel_size=(2, 2), stride=1, padding=1) # 22 -> 22 (same padding)
-        self.maxpool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=2) # 22 -> 11
+        self.mp1 = nn.MaxPool2d(kernel_size=(2, 2), stride=1, padding=1)
+        self.mp2 = nn.MaxPool2d(kernel_size=(2, 2), stride=2)
+        
+        self.bn1 = nn.BatchNorm2d(96)
+        self.bn2 = nn.BatchNorm2d(192)
+        self.bn3 = nn.BatchNorm2d(384)
 
         self.fc1 = nn.Linear(in_features=(fc1_dim ** 2) * 384, out_features=8192)
         self.fc2 = nn.Linear(in_features=8192, out_features=4096)
         self.fc3 = nn.Linear(in_features=4096, out_features=num_classes) # num_classes = 1000
         self.linear = nn.Linear(in_features=num_classes, out_features=1)
 
-        self.dropout = nn.Dropout(p=dropout_p)
+        self.dropout = nn.Dropout(p=drop_rate)
 
     def forward(self, x):
         x = self.conv1(x)
+        if self.use_batch_norm:
+            x = self.bn1(x)
         x = F.relu(x)
-        x = self.maxpool(x)
+        x = self.mp1(x)
         x = self.dropout(x)
 
         x = self.conv2(x)
+        if self.use_batch_norm:
+            x = self.bn2(x)
         x = F.relu(x)
-        x = self.maxpool2(x)
+        x = self.mp2(x)
         x = self.dropout(x)
 
         x = self.conv3(x)
+        if self.use_batch_norm:
+            x = self.bn3(x)
         x = F.relu(x)
-        x = self.maxpool(x)
+        x = self.mp1(x)
         x = self.dropout(x)
 
         x = torch.flatten(x, 1)
@@ -180,8 +192,8 @@ def train_model(
     validation_loader: DataLoader,
     loss_fn=nn.MSELoss(),
     optim: torch.optim.Optimizer=torch.optim.Adam,
-    lr: float=1e-5,
-    num_epochs: int=10,
+    lr: float=1e-4,
+    num_epochs: int=25,
     specifier="",
     loss_str="MSE Loss",
     optim_str="Adam"):
@@ -344,6 +356,7 @@ def load_data():
     df = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
     df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
     df["age"] = df["age"].astype(np.float32)
+    df = df.sample(frac=1).reset_index(drop=True)
 
     train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
 
@@ -387,27 +400,32 @@ def main():
     validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
-    # ResNet Test
+    train_resnet = True
+    train_cnn = False
 
-    resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 3, 3, 3))) # ResNet18
+    # ResNet
+    if train_resnet:
+        resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))) # ResNet50
 
-    train_model(model=resnet_model, train_loader=train_loader, validation_loader=validation_loader, specifier="ResNet18")
+        best_weights, best_loss = train_model(model=resnet_model, train_loader=train_loader, validation_loader=validation_loader, specifier="ResNet50", num_epochs=20)
 
-    torch.save(resnet_model.state_dict(), "resnet18.pth")
+        torch.save(best_weights, "resnet50.pth")
 
-    test_model(model=resnet_model, test_loader=test_loader, specifier="ResNet18")
+        resnet_model.load_state_dict(best_weights)
 
-    # CNN Test
+        test_model(model=resnet_model, test_loader=test_loader, specifier="ResNet50")
 
-    cnn_model = CNNRegression(image_resize, 1, 0)
+    # CNN
+    if train_cnn:
+        cnn_model = CNNRegression(image_resize, 1, use_batch_norm=batch_size > 1)
 
-    train_model(model=cnn_model, train_loader=train_loader, validation_loader=validation_loader, specifier="CNN")
+        best_weights, best_loss = train_model(model=cnn_model, train_loader=train_loader, validation_loader=validation_loader, specifier="CNN", num_epochs=20)
 
-    torch.save(cnn_model.state_dict(), "cnn.pth")
+        torch.save(best_weights, "cnn.pth")
 
-    test_model(model=cnn_model, test_loader=test_loader, specifier="CNN")
+        cnn_model.load_state_dict(best_weights)
 
-    pass
+        test_model(model=cnn_model, test_loader=test_loader, specifier="CNN")
 
 if __name__ == "__main__":
     main()
