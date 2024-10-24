@@ -747,27 +747,27 @@ def main():
 
         if load_mlp:
             model_load_test("MLP", 
-                            MLPRegression(image_resize),
+                            MLPRegression(image_resize, drop_rate=drop_rate),
                             "mlp.pth",
                             test_loader)
         if load_cnn:
             model_load_test("CNN", 
-                            CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1),
+                            CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate),
                             "cnn.pth",
                             test_loader)
         if load_vgg:
             model_load_test("VGG16", 
-                            RegressionModel(base_model=vgg.vgg16(in_chans=1)),
+                            RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate)),
                             "vgg16.pth",
                             test_loader)
         if load_resnet:
             model_load_test("ResNet50", 
-                            RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))),
+                            RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate)),
                             "resnet50.pth",
                             test_loader)
         if load_vit:
             model_load_test("ViT-tiny-patch16", 
-                            RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3)),
+                            RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate)),
                             "vit-tiny-patch16.pth",
                             test_loader)
         if load_fastvit:
