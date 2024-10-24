@@ -413,13 +413,15 @@ def test_model(
             traceback.print_exc()
     pass
 
+
 def model_train_test(
         model_name: str,
         model: nn.Module,
         weights_file_name: str,
         train_loader: DataLoader, 
         validation_loader: DataLoader,
-        test_loader: DataLoader, 
+        test_loader: DataLoader,
+        losses_df: pd.DataFrame, 
         optimizer: torch.optim.Optimizer, 
         loss_fn: nn.Module,
         lr: float = 1e-4,
@@ -428,7 +430,7 @@ def model_train_test(
     """
     Trains, tests, and saves the weights for a given model
     """
-
+    curr_time = time.time()
     best_weights, train_losses, validation_losses = train_model(model=model, 
                                                                             train_loader=train_loader, 
                                                                             validation_loader=validation_loader, 
@@ -437,11 +439,16 @@ def model_train_test(
                                                                             loss_fn=loss_fn,
                                                                             lr=lr,
                                                                             num_epochs=num_epochs)
+    stop_time = time.time()
+    diff = stop_time - curr_time
+
+    print("Total training time for {}: {:.3f} seconds.\n".format(model_name, diff))
 
     torch.save(best_weights, os.path.join(abs_path, weights_file_name))
-    losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                "Training_Losses": np.asarray(train_losses),
-                                                "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+    if losses_df is not None:
+        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                    "Training_Losses": np.asarray(train_losses),
+                                                    "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
     model.load_state_dict(best_weights)
 
@@ -535,7 +542,7 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
 
     # Getting the shape of the data
     print("DataFrame Head: {}".format(imageData.head()))
-    print("Shape: {}".format(imageData.shape))
+    print("Shape: {}\n".format(imageData.shape))
 
     if plot_eda_graphs:
 
@@ -620,10 +627,9 @@ def main():
     # Constants
     batch_size = 32
 
-    # Hyperparameters
+    # Hyperparameters for optimization testing
     optimizer = torch.optim.Adam # adam | sgd -> sgd more precise, adam faster to converge
     loss_fn = nn.MSELoss() # nn.MSELoss() | nn.L1Loss() -> mse: complex, L1 simpler
-    
     drop_rate = 0 # 0.15
 
     train_loader = DataLoader(train_set, shuffle=True, batch_size=batch_size)
@@ -631,16 +637,16 @@ def main():
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
     do_explain = False # Run explainability analysis
-    test_only = True # Whether or not to just run model tests or to train models as well
+    test_only = False # Whether or not to just run model tests or to train models as well
     plot_losses = True
     save_losses = False
     
     load_mlp = False
     load_cnn = False
     load_vgg = False
-    load_resnet = False
+    load_resnet = True
     load_vit = False
-    load_fastvit = True
+    load_fastvit = False
 
     # Model Training and evaluation
 
@@ -653,6 +659,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)
         # CNN
@@ -663,6 +670,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)       
         # VGG
@@ -673,6 +681,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)
         # ResNet
@@ -683,6 +692,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)
         # ViT
@@ -693,6 +703,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)
         # FastViT
@@ -703,6 +714,7 @@ def main():
                              train_loader,
                              validation_loader,
                              test_loader,
+                             losses_df,
                              optimizer,
                              loss_fn)
     else:
