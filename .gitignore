@@ -16,6 +16,9 @@
 # Models
 *.pth
 
+# Figures folder
+figures/
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

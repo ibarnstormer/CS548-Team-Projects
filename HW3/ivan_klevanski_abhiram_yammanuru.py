@@ -47,7 +47,7 @@ warnings.filterwarnings("ignore")
 
 abs_path = os.path.dirname(os.path.abspath(__file__))
 
-plot_graphs = True
+plot_eda_graphs = True
 
 # Params
 
@@ -64,8 +64,14 @@ class ImageDataSet(Dataset):
     PyTorch Dataset for image data
     """
 
-    def __init__(self, images: list, labels: list):
+    oversample_preprocessing = albumentations.Compose([
+            albumentations.VerticalFlip(),
+            albumentations.pytorch.ToTensorV2()
+    ])
+
+    def __init__(self, images: list, oversamples: list, labels: list):
         self.images = np.asarray(images) / 255
+        self.oversamples = oversamples
         self.labels = labels
 
     def __len__(self):
@@ -73,7 +79,13 @@ class ImageDataSet(Dataset):
 
     def __getitem__(self, item):
 
-        image = torch.from_numpy(np.asarray(self.images[item]).reshape(1, image_resize, image_resize))
+        image = np.asarray(self.images[item]).reshape(1, image_resize, image_resize)
+        oversample = self.oversamples[item]
+
+        if oversample == 1:
+            image = self.oversample_preprocessing(image=image)["image"].permute(1, 2, 0)
+        else:
+            image = torch.from_numpy(image)
 
         # Format/adjust image
         label = self.labels[item]
@@ -109,18 +121,18 @@ class CNNetRegression(nn.Module):
 
         fc1_dim = int(((dim - 4) / 2) / 2) # dim - (conv1 kernel_size / conv1 stride) / (maxpool2 stride)
 
-        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=96, kernel_size=(4, 4), stride=2)
-        self.conv2 = nn.Conv2d(in_channels=96, out_channels=192, kernel_size=(4, 4), stride=1, padding=2)
-        self.conv3 = nn.Conv2d(in_channels=192, out_channels=384, kernel_size=(3, 3), stride=1)
+        self.conv1 = nn.Conv2d(in_channels=color_dim, out_channels=48, kernel_size=(4, 4), stride=2)
+        self.conv2 = nn.Conv2d(in_channels=48, out_channels=96, kernel_size=(4, 4), stride=1, padding=2)
+        self.conv3 = nn.Conv2d(in_channels=96, out_channels=192, kernel_size=(3, 3), stride=1)
 
         self.mp1 = nn.MaxPool2d(kernel_size=(2, 2), stride=1, padding=1)
         self.mp2 = nn.MaxPool2d(kernel_size=(2, 2), stride=2)
         
-        self.bn1 = nn.BatchNorm2d(96)
-        self.bn2 = nn.BatchNorm2d(192)
-        self.bn3 = nn.BatchNorm2d(384)
+        self.bn1 = nn.BatchNorm2d(48)
+        self.bn2 = nn.BatchNorm2d(96)
+        self.bn3 = nn.BatchNorm2d(192)
 
-        self.fc1 = nn.Linear(in_features=(fc1_dim ** 2) * 384, out_features=8192)
+        self.fc1 = nn.Linear(in_features=(fc1_dim ** 2) * 192, out_features=8192)
         self.fc2 = nn.Linear(in_features=8192, out_features=4096)
         self.fc3 = nn.Linear(in_features=4096, out_features=num_classes) # num_classes = 1000
         self.linear = nn.Linear(in_features=num_classes, out_features=1)
@@ -208,13 +220,13 @@ def train_model(
     model: nn.Module, 
     train_loader: DataLoader, 
     validation_loader: DataLoader,
-    loss_fn=nn.MSELoss(),
-    optim: torch.optim.Optimizer=torch.optim.Adam,
-    lr: float=1e-4,
-    num_epochs: int=15,
-    specifier="",
-    loss_str="MSE Loss",
-    optim_str="Adam"):
+    loss_fn = nn.MSELoss(),
+    optim: torch.optim.Optimizer = torch.optim.Adam,
+    lr: float = 1e-4,
+    num_epochs: int = 15,
+    specifier = "",
+    loss_str = "MSE Loss",
+    optim_str = "Adam"):
     """
     Trains the model via backpropagation
 
@@ -246,9 +258,9 @@ def train_model(
                 loss.backward()
                 optimizer.step()
 
-            run_loss += loss.item() * images.size(0)
+            run_loss += loss.item()
 
-        return run_loss / (len(data_loader) * data_loader.batch_size)
+        return run_loss / len(data_loader)
 
     def validate(data_loader: DataLoader):
         """
@@ -271,9 +283,9 @@ def train_model(
                 outputs = model(images)
                 loss = loss_fn(outputs.squeeze().float(), labels.float())
 
-            run_loss += loss.item() * images.size(0)
+            run_loss += loss.item()
 
-        return run_loss / (len(data_loader) * data_loader.batch_size)
+        return run_loss / len(data_loader)
 
     if model is not None:
         try:
@@ -324,7 +336,7 @@ def train_model(
 def test_model(
     model: nn.Module, 
     test_loader: DataLoader, 
-    specifier=""):
+    specifier = ""):
 
     if model is not None:
         try:
@@ -376,23 +388,36 @@ def load_data():
     print("[Info]: Loading data. \n")
     
     df = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
+
+    # Oversampling for vertical image flip
+    df["oversample"] = 0
+    oversample_df = df.copy()
+
+    oversample_df["oversample"] = 1
+    df = pd.concat([df, oversample_df], ignore_index=True)
+    
+    # Format pixels and age to float32 and shuffle dataframe
     df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
     df["age"] = df["age"].astype(np.float32)
     df = df.sample(frac=1).reset_index(drop=True)
 
+    # Train, Validation, and Test datasets
     train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
-
     train_df, validation_df = skl_ms.train_test_split(train_df, test_size=0.15)
 
-    train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["age"].tolist())
-    validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["age"].tolist())
-    test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["age"].tolist())
+    train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["oversample"].tolist(), train_df["age"].tolist())
+    validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["oversample"].tolist(), validation_df["age"].tolist())
+    test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["oversample"].tolist(), test_df["age"].tolist())
 
     return df, train_set, validation_set, test_set
 
 # Utility methods
 
 def graph_losses(df: pd.DataFrame):
+    """
+    Graphs training and validation losses
+    **df**: DataFrame containing losses per model
+    """
 
     for model_name in df["Model_Name"].unique():
         train_losses = df.loc[df["Model_Name"] == model_name]["Training_Losses"].to_numpy()
@@ -440,10 +465,10 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
     imageData = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
 
     # Getting the shape of the data
-    imageData.head()
-    imageData.shape
+    print("DataFrame Head: {}".format(imageData.head()))
+    print("Shape: {}".format(imageData.shape))
 
-    if plot_graphs:
+    if plot_eda_graphs:
 
         # Plotting the distribution of Age 
         vcs = imageData['age'].value_counts()
@@ -496,114 +521,189 @@ def main():
     setup()
 
     df, train_set, validation_set, test_set = load_data()
-
+    
+    # EDA
     EDA(df, train_set)
 
     losses_df = pd.DataFrame(columns=["Model_Name", "Training_Losses", "Validation_Losses"])
 
-    # Hyperparameters
-    batch_size = 32
-
+    # Hyperparameters ()
+    batch_size = 32 # 16 | 32
+    optimizer = torch.optim.Adam # adam | sgd
+    loss_fn = nn.MSELoss() # nn.MSELoss() | nn.L1Loss()
 
     train_loader = DataLoader(train_set, shuffle=True, batch_size=batch_size)
     validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
     test_only = False # Whether or not to just run model tests or to train models as well
-    save_loss = False
+    plot_losses = True
+    save_losses = True
     
-    train_mlp = False
-    train_cnn = False
-    train_vgg = False
-    train_resnet = False
-    train_vit = False # Bad compared to CNNs
+    load_mlp = False
+    load_cnn = False
+    load_vgg = False
+    load_resnet = False
+    load_vit = False # Bad compared to CNNs
+
+    # Model Training and evaluation
+
+    if not test_only:
+        # MLP
+        if load_mlp:
+            model_name = "MLP"
+            mlp_model = MLPRegression(image_resize)
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=mlp_model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "mlp.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            mlp_model.load_state_dict(best_weights)
+
+            test_model(model=mlp_model, test_loader=test_loader, specifier=model_name)
+
+        # CNN
+        if load_cnn:
+            model_name = "CNN"
+            cnn_model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=cnn_model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "cnn.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            cnn_model.load_state_dict(best_weights)
+
+            test_model(model=cnn_model, test_loader=test_loader, specifier=model_name)
+        
+        # VGG
+        if load_vgg:
+            model_name = "VGG16"
+            vgg_model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=vgg_model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "vgg16.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            vgg_model.load_state_dict(best_weights)
+
+            test_model(model=vgg_model, test_loader=test_loader, specifier=model_name)
+
+        # ResNet
+        if load_resnet:
+            model_name = "ResNet50"
+            resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))) # ResNet50
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=resnet_model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "resnet50.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            resnet_model.load_state_dict(best_weights)
+
+            test_model(model=resnet_model, test_loader=test_loader, specifier=model_name)
+
+        # ViT
+        if load_vit:
+            model_name = "ViT-tiny-patch16"
+            vit_model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=vit_model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "vit-tiny-patch16.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            vit_model.load_state_dict(best_weights)
+
+            test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
+    else:
+        losses_df = pd.read_csv(os.path.join(abs_path, "losses.csv"))
+
+        if load_mlp:
+            model_name = "MLP"
+            weights = torch.load(os.path.join(abs_path, "mlp.pth"), map_location=device)
+            mlp_model = MLPRegression(image_resize)
+
+            mlp_model.load_state_dict(weights)
+            test_model(model=mlp_model, test_loader=test_loader, specifier=model_name)
+
+        if load_cnn:
+            model_name = "CNN"
+            weights = torch.load(os.path.join(abs_path, "cnn.pth"), map_location=device)
+            cnn_model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
+
+            cnn_model.load_state_dict(weights)
+            test_model(model=cnn_model, test_loader=test_loader, specifier=model_name)
+
+        if load_vgg:
+            model_name = "VGG16"
+            weights = torch.load(os.path.join(abs_path, "vgg16.pth"), map_location=device)
+            vgg_model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
+
+            vgg_model.load_state_dict(weights)
+            test_model(model=vgg_model, test_loader=test_loader, specifier=model_name)
+
+        if load_resnet:
+            model_name = "ResNet50"
+            weights = torch.load(os.path.join(abs_path, "resnet50.pth"), map_location=device)
+            resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3)))
+
+            resnet_model.load_state_dict(weights)
+            test_model(model=resnet_model, test_loader=test_loader, specifier=model_name)
+
+        if load_vit:
+            model_name = "ViT-tiny-patch16"
+            weights = torch.load(os.path.join(abs_path, "vit-tiny-patch16.pth"), map_location=device)
+            vit_model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
+
+            vit_model.load_state_dict(weights)
+            test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
 
 
-    # MLP
-    if train_mlp:
-        model_name = "MLP"
-        mlp_model = MLPRegression(image_resize)
-
-        best_weights, best_loss, train_losses, validation_losses = train_model(model=mlp_model, train_loader=train_loader, validation_loader=validation_loader, specifier=model_name)
-
-        torch.save(best_weights, "mlp.pth")
-        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                       "Training_Losses": np.asarray(train_losses),
-                                                       "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-        mlp_model.load_state_dict(best_weights)
-
-        test_model(model=mlp_model, test_loader=test_loader, specifier=model_name)
-
-    # CNN
-    if train_cnn:
-        model_name = "CNN"
-        cnn_model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
-
-        best_weights, best_loss, train_losses, validation_losses = train_model(model=cnn_model, train_loader=train_loader, validation_loader=validation_loader, specifier=model_name)
-
-        torch.save(best_weights, "cnn.pth")
-        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                       "Training_Losses": np.asarray(train_losses),
-                                                       "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-        cnn_model.load_state_dict(best_weights)
-
-        test_model(model=cnn_model, test_loader=test_loader, specifier=model_name)
-    
-    # VGG
-    if train_vgg:
-        model_name = "VGG16"
-        vgg_model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
-
-        best_weights, best_loss, train_losses, validation_losses = train_model(model=vgg_model, train_loader=train_loader, validation_loader=validation_loader, specifier=model_name)
-
-        torch.save(best_weights, "vgg16.pth")
-        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                       "Training_Losses": np.asarray(train_losses),
-                                                       "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-        vgg_model.load_state_dict(best_weights)
-
-        test_model(model=vgg_model, test_loader=test_loader, specifier=model_name)
-
-    # ResNet
-    if train_resnet:
-        model_name = "ResNet50"
-        resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))) # ResNet50
-
-        best_weights, best_loss, train_losses, validation_losses = train_model(model=resnet_model, train_loader=train_loader, validation_loader=validation_loader, specifier=model_name, num_epochs=5)
-
-        torch.save(best_weights, os.path.join(abs_path, "resnet50.pth"))
-        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                       "Training_Losses": np.asarray(train_losses),
-                                                       "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-        resnet_model.load_state_dict(best_weights)
-
-        test_model(model=resnet_model, test_loader=test_loader, specifier=model_name)
-
-    # ViT
-    if train_vit:
-        model_name = "ViT-tiny-patch16"
-        vit_model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
-
-        best_weights, best_loss, train_losses, validation_losses = train_model(model=vit_model, train_loader=train_loader, validation_loader=validation_loader, specifier=model_name)
-
-        torch.save(best_weights, os.path.join(abs_path, "vit-tiny-patch16.pth"))
-        losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                       "Training_Losses": np.asarray(train_losses),
-                                                       "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-        vit_model.load_state_dict(best_weights)
-
-        test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
-
-    if plot_graphs:
+    if plot_losses:
         graph_losses(losses_df)
 
-    if save_loss:
+    if save_losses:
         losses_df.to_csv(os.path.join(abs_path, "losses.csv"))
+
+    
 
 if __name__ == "__main__":
     main()
