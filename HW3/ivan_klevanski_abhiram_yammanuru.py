@@ -429,16 +429,18 @@ def model_train_test(
         ):
     """
     Trains, tests, and saves the weights for a given model
+
+    **Returns**
     """
     curr_time = time.time()
     best_weights, train_losses, validation_losses = train_model(model=model, 
-                                                                            train_loader=train_loader, 
-                                                                            validation_loader=validation_loader, 
-                                                                            specifier=model_name, 
-                                                                            optim=optimizer, 
-                                                                            loss_fn=loss_fn,
-                                                                            lr=lr,
-                                                                            num_epochs=num_epochs)
+                                                                train_loader=train_loader, 
+                                                                validation_loader=validation_loader, 
+                                                                specifier=model_name, 
+                                                                optim=optimizer, 
+                                                                loss_fn=loss_fn,
+                                                                lr=lr,
+                                                                num_epochs=num_epochs)
     stop_time = time.time()
     diff = stop_time - curr_time
 
@@ -453,6 +455,8 @@ def model_train_test(
     model.load_state_dict(best_weights)
 
     test_model(model=model, test_loader=test_loader, specifier=model_name)
+
+    return losses_df
 
 
 def model_load_test(
@@ -639,21 +643,21 @@ def main():
     do_explain = False # Run explainability analysis
     test_only = False # Whether or not to just run model tests or to train models as well
     plot_losses = True
-    save_losses = False
+    save_losses = True
     
-    load_mlp = False
-    load_cnn = False
-    load_vgg = False
+    load_mlp = True
+    load_cnn = True
+    load_vgg = True
     load_resnet = True
-    load_vit = False
-    load_fastvit = False
+    load_vit = True
+    load_fastvit = True
 
     # Model Training and evaluation
 
     if not test_only:
         # MLP
         if load_mlp:
-            model_train_test("MLP", 
+            losses_df = model_train_test("MLP", 
                              MLPRegression(image_resize, drop_rate=drop_rate), 
                              "mlp.pth",
                              train_loader,
@@ -664,7 +668,7 @@ def main():
                              loss_fn)
         # CNN
         if load_cnn:
-            model_train_test("CNN", 
+            losses_df = model_train_test("CNN", 
                              CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate), 
                              "cnn.pth",
                              train_loader,
@@ -675,7 +679,7 @@ def main():
                              loss_fn)       
         # VGG
         if load_vgg:
-            model_train_test("VGG16", 
+            losses_df = model_train_test("VGG16", 
                              RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate)), 
                              "vgg16.pth",
                              train_loader,
@@ -686,7 +690,7 @@ def main():
                              loss_fn)
         # ResNet
         if load_resnet:
-            model_train_test("ResNet50", 
+            losses_df = model_train_test("ResNet50", 
                              RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate)), 
                              "resnet50.pth",
                              train_loader,
@@ -697,7 +701,7 @@ def main():
                              loss_fn)
         # ViT
         if load_vit:
-            model_train_test("ViT-tiny-patch16", 
+            losses_df = model_train_test("ViT-tiny-patch16", 
                              RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate)), 
                              "vit-tiny-patch16.pth",
                              train_loader,
@@ -708,7 +712,7 @@ def main():
                              loss_fn)
         # FastViT
         if load_fastvit:
-            model_train_test("FastViT-SA12", 
+            losses_df = model_train_test("FastViT-SA12", 
                              RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate)), 
                              "fastvit-sa12.pth",
                              train_loader,
