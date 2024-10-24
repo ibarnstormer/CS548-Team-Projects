@@ -41,13 +41,14 @@ from tqdm.auto import tqdm
 from timm.models import vgg
 from timm.models import resnet
 from timm.models import vision_transformer
+from timm.models import fastvit
 from lime import lime_image
 
 warnings.filterwarnings("ignore")
 
 abs_path = os.path.dirname(os.path.abspath(__file__))
 
-plot_eda_graphs = True
+plot_eda_graphs = False
 
 # Params
 
@@ -413,6 +414,25 @@ def load_data():
 
 # Utility methods
 
+def visualize_tensor(t: torch.Tensor, plot_title: str = ""):
+    """
+    Plots a given 4D tensor (collection/batch of 3D tensors (2D tensor plus color dimension)) in a grid-like pattern<br>
+
+    Tensor dimensions: (b, c, h, w)<br>
+    **b**: Batch index (single instance of an image-like tensor)<br>
+    **c**: Color dimension (1 for grayscale, 3 for colored)<br> 
+    **h**: Height dimension<br>
+    **w**: Width dimension
+    """
+
+    grid = torchvision.utils.make_grid(t, nrow=int(np.ceil(t.shape[0] ** 0.5)))
+
+    plt.imshow(grid.permute(1, 2, 0))
+    if plot_title != "":
+        plt.title(plot_title)
+    plt.show()
+
+
 def graph_losses(df: pd.DataFrame):
     """
     Graphs training and validation losses
@@ -447,10 +467,7 @@ def visualize_image(ds: ImageDataSet, batch_size: int = 16, idx: int = 0):
         image_batch, _ = next(it)
         i += 1
         if i >= idx:
-            grid = torchvision.utils.make_grid(image_batch, nrow=int(batch_size ** 0.5))
-
-            plt.imshow(grid.permute(1, 2, 0))
-            plt.show()
+            visualize_tensor(image_batch)
             break
 
 
@@ -511,8 +528,29 @@ def data_preprocessing():
     pass
 
 
-def explainability():
-    # TODO
+def explainability(ds: ImageDataSet):
+    """
+    Provides an interpretation on how the image regressors make their predictions
+
+    """
+
+    # Load CNN to use as example
+    weights = torch.load(os.path.join(abs_path, "cnn.pth"), map_location=torch.device("cpu"))
+    model = CNNetRegression(image_resize, 1, use_batch_norm=True)
+
+    model = model.to(torch.device("cpu"))
+
+    model.load_state_dict(weights)
+    
+    # Visualization of convolution filters (note: just conv1 since subsequent have a color dimension exceeding 3)
+    conv1_kernels = model.conv1.weight.data
+
+    visualize_tensor(conv1_kernels, "Visualization of kernels for layer: conv1")
+
+
+    # LIME Implementation
+
+
     pass
 
 
@@ -527,24 +565,30 @@ def main():
 
     losses_df = pd.DataFrame(columns=["Model_Name", "Training_Losses", "Validation_Losses"])
 
-    # Hyperparameters ()
-    batch_size = 32 # 16 | 32
-    optimizer = torch.optim.Adam # adam | sgd
-    loss_fn = nn.MSELoss() # nn.MSELoss() | nn.L1Loss()
+    # Constants
+    batch_size = 32
+
+    # Hyperparameters
+    optimizer = torch.optim.Adam # adam | sgd -> sgd more precise, adam faster to converge
+    loss_fn = nn.MSELoss() # nn.MSELoss() | nn.L1Loss() -> mse: complex, L1 simpler
+    
+    drop_rate = 0 # 0.15
 
     train_loader = DataLoader(train_set, shuffle=True, batch_size=batch_size)
     validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
-    test_only = False # Whether or not to just run model tests or to train models as well
+    do_explain = False # Run explainability analysis
+    test_only = True # Whether or not to just run model tests or to train models as well
     plot_losses = True
-    save_losses = True
+    save_losses = False
     
     load_mlp = False
     load_cnn = False
     load_vgg = False
     load_resnet = False
-    load_vit = False # Bad compared to CNNs
+    load_vit = False
+    load_fastvit = True
 
     # Model Training and evaluation
 
@@ -552,9 +596,9 @@ def main():
         # MLP
         if load_mlp:
             model_name = "MLP"
-            mlp_model = MLPRegression(image_resize)
+            model = MLPRegression(image_resize, drop_rate=drop_rate)
 
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=mlp_model, 
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
                                                                                    train_loader=train_loader, 
                                                                                    validation_loader=validation_loader, 
                                                                                    specifier=model_name, 
@@ -566,16 +610,16 @@ def main():
                                                         "Training_Losses": np.asarray(train_losses),
                                                         "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-            mlp_model.load_state_dict(best_weights)
+            model.load_state_dict(best_weights)
 
-            test_model(model=mlp_model, test_loader=test_loader, specifier=model_name)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         # CNN
         if load_cnn:
             model_name = "CNN"
-            cnn_model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
+            model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate)
 
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=cnn_model, 
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
                                                                                    train_loader=train_loader, 
                                                                                    validation_loader=validation_loader, 
                                                                                    specifier=model_name, 
@@ -587,16 +631,16 @@ def main():
                                                         "Training_Losses": np.asarray(train_losses),
                                                         "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-            cnn_model.load_state_dict(best_weights)
+            model.load_state_dict(best_weights)
 
-            test_model(model=cnn_model, test_loader=test_loader, specifier=model_name)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
         
         # VGG
         if load_vgg:
             model_name = "VGG16"
-            vgg_model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
+            model = RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate))
 
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=vgg_model, 
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
                                                                                    train_loader=train_loader, 
                                                                                    validation_loader=validation_loader, 
                                                                                    specifier=model_name, 
@@ -608,16 +652,16 @@ def main():
                                                         "Training_Losses": np.asarray(train_losses),
                                                         "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-            vgg_model.load_state_dict(best_weights)
+            model.load_state_dict(best_weights)
 
-            test_model(model=vgg_model, test_loader=test_loader, specifier=model_name)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         # ResNet
         if load_resnet:
             model_name = "ResNet50"
-            resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))) # ResNet50
+            model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate))
 
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=resnet_model, 
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
                                                                                    train_loader=train_loader, 
                                                                                    validation_loader=validation_loader, 
                                                                                    specifier=model_name, 
@@ -629,16 +673,16 @@ def main():
                                                         "Training_Losses": np.asarray(train_losses),
                                                         "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-            resnet_model.load_state_dict(best_weights)
+            model.load_state_dict(best_weights)
 
-            test_model(model=resnet_model, test_loader=test_loader, specifier=model_name)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         # ViT
         if load_vit:
             model_name = "ViT-tiny-patch16"
-            vit_model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
+            model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate))
 
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=vit_model, 
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
                                                                                    train_loader=train_loader, 
                                                                                    validation_loader=validation_loader, 
                                                                                    specifier=model_name, 
@@ -650,58 +694,102 @@ def main():
                                                         "Training_Losses": np.asarray(train_losses),
                                                         "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-            vit_model.load_state_dict(best_weights)
+            model.load_state_dict(best_weights)
 
-            test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
+
+        # FastViT
+        if load_fastvit:
+            model_name = "FastViT-SA12"
+            model = RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate))
+
+            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
+                                                                                   train_loader=train_loader, 
+                                                                                   validation_loader=validation_loader, 
+                                                                                   specifier=model_name, 
+                                                                                   optim=optimizer, 
+                                                                                   loss_fn=loss_fn)
+
+            torch.save(best_weights, os.path.join(abs_path, "fastvit-sa12.pth"))
+            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                        "Training_Losses": np.asarray(train_losses),
+                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
+
+            model.load_state_dict(best_weights)
+
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
     else:
         losses_df = pd.read_csv(os.path.join(abs_path, "losses.csv"))
 
         if load_mlp:
             model_name = "MLP"
             weights = torch.load(os.path.join(abs_path, "mlp.pth"), map_location=device)
-            mlp_model = MLPRegression(image_resize)
+            model = MLPRegression(image_resize)
 
-            mlp_model.load_state_dict(weights)
-            test_model(model=mlp_model, test_loader=test_loader, specifier=model_name)
+            model = model.to(device)
+
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         if load_cnn:
             model_name = "CNN"
             weights = torch.load(os.path.join(abs_path, "cnn.pth"), map_location=device)
-            cnn_model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
+            model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
 
-            cnn_model.load_state_dict(weights)
-            test_model(model=cnn_model, test_loader=test_loader, specifier=model_name)
+            model = model.to(device)
+
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         if load_vgg:
             model_name = "VGG16"
             weights = torch.load(os.path.join(abs_path, "vgg16.pth"), map_location=device)
-            vgg_model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
+            model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
 
-            vgg_model.load_state_dict(weights)
-            test_model(model=vgg_model, test_loader=test_loader, specifier=model_name)
+            model = model.to(device)
+
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         if load_resnet:
             model_name = "ResNet50"
             weights = torch.load(os.path.join(abs_path, "resnet50.pth"), map_location=device)
-            resnet_model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3)))
+            model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3)))
 
-            resnet_model.load_state_dict(weights)
-            test_model(model=resnet_model, test_loader=test_loader, specifier=model_name)
+            model = model.to(device)
+
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
         if load_vit:
             model_name = "ViT-tiny-patch16"
             weights = torch.load(os.path.join(abs_path, "vit-tiny-patch16.pth"), map_location=device)
-            vit_model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
+            model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
 
-            vit_model.load_state_dict(weights)
-            test_model(model=vit_model, test_loader=test_loader, specifier=model_name)
+            model = model.to(device)
 
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
+
+        if load_fastvit:
+            model_name = "FastViT-SA12"
+            weights = torch.load(os.path.join(abs_path, "fastvit-sa12.pth"), map_location=device)
+            model = RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate))
+
+            model = model.to(device)
+
+            model.load_state_dict(weights)
+            test_model(model=model, test_loader=test_loader, specifier=model_name)
 
     if plot_losses:
         graph_losses(losses_df)
 
     if save_losses:
         losses_df.to_csv(os.path.join(abs_path, "losses.csv"))
+
+    # Explainability
+    if do_explain:
+        explainability(train_set)
 
     
 
