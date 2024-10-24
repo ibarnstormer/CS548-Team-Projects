@@ -419,16 +419,16 @@ def test_model(
 
 def model_train_test(
         model_name: str,
-        optim_name: str,
-        loss_name: str,
         model: nn.Module,
         weights_file_name: str,
         train_loader: DataLoader, 
         validation_loader: DataLoader,
         test_loader: DataLoader,
         losses_df: pd.DataFrame, 
-        optimizer: torch.optim.Optimizer, 
-        loss_fn: nn.Module,
+        optimizer: torch.optim.Optimizer = torch.optim.Adam, 
+        loss_fn: nn.Module = nn.MSELoss(),
+        optim_name: str = "Adam",
+        loss_name: str = "MSE Loss",
         lr: float = 1e-4,
         num_epochs: int = 15
         ):
@@ -637,6 +637,8 @@ def main():
 
     # Constants
     batch_size = 32
+    lr = 1e-4
+    num_epochs = 15 # 15 | 25 -> set with dropout 0 | 0.15
 
     # Hyperparameters for optimization testing
     optimizer = torch.optim.Adam # adam | sgd
@@ -666,9 +668,7 @@ def main():
     if not test_only:
         # MLP
         if load_mlp:
-            losses_df = model_train_test("MLP",
-                                         optim_name,
-                                         loss_name, 
+            losses_df = model_train_test("MLP",                                          
                                          MLPRegression(image_resize, drop_rate=drop_rate), 
                                          "mlp.pth",
                                          train_loader,
@@ -676,12 +676,14 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)
         # CNN
         if load_cnn:
-            losses_df = model_train_test("CNN",
-                                         optim_name,
-                                         loss_name,  
+            losses_df = model_train_test("CNN",                                        
                                          CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate), 
                                          "cnn.pth",
                                          train_loader,
@@ -689,12 +691,14 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)       
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)       
         # VGG
         if load_vgg:
-            losses_df = model_train_test("VGG16",
-                                         optim_name,
-                                         loss_name,  
+            losses_df = model_train_test("VGG16",  
                                          RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate)), 
                                          "vgg16.pth",
                                          train_loader,
@@ -702,12 +706,14 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)
         # ResNet
         if load_resnet:
-            losses_df = model_train_test("ResNet50",
-                                         optim_name,
-                                         loss_name,  
+            losses_df = model_train_test("ResNet50",                                          
                                          RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate)), 
                                          "resnet50.pth",
                                          train_loader,
@@ -715,12 +721,14 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)
         # ViT
         if load_vit:
-            losses_df = model_train_test("ViT-tiny-patch16",
-                                         optim_name,
-                                         loss_name,  
+            losses_df = model_train_test("ViT-tiny-patch16", 
                                          RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate)), 
                                          "vit-tiny-patch16.pth",
                                          train_loader,
@@ -728,12 +736,14 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)
         # FastViT
         if load_fastvit:
-            losses_df = model_train_test("FastViT-SA12",
-                                         optim_name,
-                                         loss_name,  
+            losses_df = model_train_test("FastViT-SA12",  
                                          RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate)), 
                                          "fastvit-sa12.pth",
                                          train_loader,
@@ -741,7 +751,11 @@ def main():
                                          test_loader,
                                          losses_df,
                                          optimizer,
-                                         loss_fn)
+                                         loss_fn,
+                                         optim_name,
+                                         loss_name,
+                                         lr,
+                                         num_epochs)
     else:
         losses_df = pd.read_csv(os.path.join(abs_path, "losses.csv"))
 
