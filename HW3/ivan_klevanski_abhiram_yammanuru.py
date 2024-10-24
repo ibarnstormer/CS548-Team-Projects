@@ -19,7 +19,7 @@ import copy
 import os
 import random
 import traceback
-import timm
+import time
 import sklearn.metrics as skl_m
 import sklearn.model_selection as skl_ms
 import torch.nn as nn
@@ -32,7 +32,6 @@ import albumentations.pytorch
 import torch.nn.functional as F
 import warnings
 
-from PIL import Image
 from torch.utils.data import Dataset
 from timm import utils
 from torch.utils.data import DataLoader
@@ -58,7 +57,7 @@ image_resize = 48
 
 num_classes = 1000 # Models from timm use 1000 as default number of classes
 
-# Pytorch-specific methods and classes
+""" ------ Core Classes ------ """
 
 class ImageDataSet(Dataset):
     """
@@ -97,7 +96,7 @@ class MLPRegression(nn.Module):
     """
     Multi-Layer Perceptron regression model
     """
-    def __init__(self, dim, drop_rate=0):
+    def __init__(self, dim, drop_rate: float = 0):
         super(MLPRegression, self).__init__()
         self.mlp = torchvision.ops.MLP(in_channels=dim**2, dropout=drop_rate, hidden_channels=[int((dim**2) * 2), int((dim**2) * 3), int((dim**2) * 5), int((dim**2) * 3), int((dim**2) * 2), num_classes])   
         self.linear = nn.Linear(in_features=num_classes, out_features=1)
@@ -195,6 +194,7 @@ class RegressionModel(nn.Module):
 
         return x
 
+""" ------ Core Methods ------ """
 
 def setup():
     """
@@ -217,6 +217,39 @@ def setup():
     torch.manual_seed(seed)
 
 
+def load_data():
+    """
+    Loads and initializes all datasets<br>
+    **Returns**: dataframe and datasets for regression task
+    """
+
+    print("[Info]: Loading data. \n")
+    
+    df = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
+
+    # Oversampling for vertical image flip
+    df["oversample"] = 0
+    oversample_df = df.copy()
+
+    oversample_df["oversample"] = 1
+    df = pd.concat([df, oversample_df], ignore_index=True)
+    
+    # Format pixels and age to float32 and shuffle dataframe
+    df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
+    df["age"] = df["age"].astype(np.float32)
+    df = df.sample(frac=1).reset_index(drop=True)
+
+    # Train, Validation, and Test datasets
+    train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
+    train_df, validation_df = skl_ms.train_test_split(train_df, test_size=0.15)
+
+    train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["oversample"].tolist(), train_df["age"].tolist())
+    validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["oversample"].tolist(), validation_df["age"].tolist())
+    test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["oversample"].tolist(), test_df["age"].tolist())
+
+    return df, train_set, validation_set, test_set
+
+
 def train_model(
     model: nn.Module, 
     train_loader: DataLoader, 
@@ -231,6 +264,7 @@ def train_model(
     """
     Trains the model via backpropagation
 
+    **Returns**: Trained model weights, train losses, validation losses
     """
     
     # Utility methods
@@ -326,7 +360,7 @@ def train_model(
 
             print("Lowest validation loss: {:.4f}".format(m_best_loss))
             print("Parameters used: Learning Rate: {:.4f}, Number of Epochs: {}, Loss Function: {}, Optimizer: {}\n".format(lr, num_epochs, loss_str, optim_str))
-            return m_best_weights, m_best_loss, train_losses, validation_losses
+            return m_best_weights, train_losses, validation_losses
         except Exception:
             print("[Error]: %s training failed due to an exception, exiting...\n" % specifier)
             print("[Error]: Exception occurred during training")
@@ -379,40 +413,58 @@ def test_model(
             traceback.print_exc()
     pass
 
-
-def load_data():
+def model_train_test(
+        model_name: str,
+        model: nn.Module,
+        weights_file_name: str,
+        train_loader: DataLoader, 
+        validation_loader: DataLoader,
+        test_loader: DataLoader, 
+        optimizer: torch.optim.Optimizer, 
+        loss_fn: nn.Module,
+        lr: float = 1e-4,
+        num_epochs: int = 15
+        ):
     """
-    Loads and initializes all datasets<br>
-    **Returns**: dataframe and datasets for regression task
+    Trains, tests, and saves the weights for a given model
     """
 
-    print("[Info]: Loading data. \n")
-    
-    df = pd.read_csv(os.path.join(abs_path, "age_gender.csv"))
+    best_weights, train_losses, validation_losses = train_model(model=model, 
+                                                                            train_loader=train_loader, 
+                                                                            validation_loader=validation_loader, 
+                                                                            specifier=model_name, 
+                                                                            optim=optimizer, 
+                                                                            loss_fn=loss_fn,
+                                                                            lr=lr,
+                                                                            num_epochs=num_epochs)
 
-    # Oversampling for vertical image flip
-    df["oversample"] = 0
-    oversample_df = df.copy()
+    torch.save(best_weights, os.path.join(abs_path, weights_file_name))
+    losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
+                                                "Training_Losses": np.asarray(train_losses),
+                                                "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
 
-    oversample_df["oversample"] = 1
-    df = pd.concat([df, oversample_df], ignore_index=True)
-    
-    # Format pixels and age to float32 and shuffle dataframe
-    df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
-    df["age"] = df["age"].astype(np.float32)
-    df = df.sample(frac=1).reset_index(drop=True)
+    model.load_state_dict(best_weights)
 
-    # Train, Validation, and Test datasets
-    train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
-    train_df, validation_df = skl_ms.train_test_split(train_df, test_size=0.15)
+    test_model(model=model, test_loader=test_loader, specifier=model_name)
 
-    train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["oversample"].tolist(), train_df["age"].tolist())
-    validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["oversample"].tolist(), validation_df["age"].tolist())
-    test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["oversample"].tolist(), test_df["age"].tolist())
 
-    return df, train_set, validation_set, test_set
+def model_load_test(
+        model_name: str,
+        model: nn.Module,
+        weights_file_name: str,
+        test_loader: DataLoader):
+    """
+    Loads model weights and tests model
+    """
 
-# Utility methods
+    weights = torch.load(os.path.join(abs_path, weights_file_name), map_location=device)
+
+    model = model.to(device)
+
+    model.load_state_dict(weights)
+    test_model(model=model, test_loader=test_loader, specifier=model_name)
+
+""" ------ PyTorch Utility methods ------ """
 
 def visualize_tensor(t: torch.Tensor, plot_title: str = ""):
     """
@@ -471,7 +523,7 @@ def visualize_image(ds: ImageDataSet, batch_size: int = 16, idx: int = 0):
             break
 
 
-# Other methods
+""" ------ Project Tasks ------ """
 
 def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
     """
@@ -595,191 +647,97 @@ def main():
     if not test_only:
         # MLP
         if load_mlp:
-            model_name = "MLP"
-            model = MLPRegression(image_resize, drop_rate=drop_rate)
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "mlp.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_train_test("MLP", 
+                             MLPRegression(image_resize, drop_rate=drop_rate), 
+                             "mlp.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)
         # CNN
         if load_cnn:
-            model_name = "CNN"
-            model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate)
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "cnn.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-        
+            model_train_test("CNN", 
+                             CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1, drop_rate=drop_rate), 
+                             "cnn.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)       
         # VGG
         if load_vgg:
-            model_name = "VGG16"
-            model = RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate))
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "vgg16.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_train_test("VGG16", 
+                             RegressionModel(base_model=vgg.vgg16(in_chans=1, drop_rate=drop_rate)), 
+                             "vgg16.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)
         # ResNet
         if load_resnet:
-            model_name = "ResNet50"
-            model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate))
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "resnet50.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_train_test("ResNet50", 
+                             RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3), drop_rate=drop_rate)), 
+                             "resnet50.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)
         # ViT
         if load_vit:
-            model_name = "ViT-tiny-patch16"
-            model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate))
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "vit-tiny-patch16.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_train_test("ViT-tiny-patch16", 
+                             RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3, drop_rate=drop_rate)), 
+                             "vit-tiny-patch16.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)
         # FastViT
         if load_fastvit:
-            model_name = "FastViT-SA12"
-            model = RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate))
-
-            best_weights, best_loss, train_losses, validation_losses = train_model(model=model, 
-                                                                                   train_loader=train_loader, 
-                                                                                   validation_loader=validation_loader, 
-                                                                                   specifier=model_name, 
-                                                                                   optim=optimizer, 
-                                                                                   loss_fn=loss_fn)
-
-            torch.save(best_weights, os.path.join(abs_path, "fastvit-sa12.pth"))
-            losses_df = pd.concat([losses_df, pd.DataFrame({"Model_Name": model_name, 
-                                                        "Training_Losses": np.asarray(train_losses),
-                                                        "Validation_Losses": np.asarray(validation_losses)})], ignore_index=True)
-
-            model.load_state_dict(best_weights)
-
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
+            model_train_test("FastViT-SA12", 
+                             RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate)), 
+                             "fastvit-sa12.pth",
+                             train_loader,
+                             validation_loader,
+                             test_loader,
+                             optimizer,
+                             loss_fn)
     else:
         losses_df = pd.read_csv(os.path.join(abs_path, "losses.csv"))
 
         if load_mlp:
-            model_name = "MLP"
-            weights = torch.load(os.path.join(abs_path, "mlp.pth"), map_location=device)
-            model = MLPRegression(image_resize)
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_load_test("MLP", 
+                            MLPRegression(image_resize),
+                            "mlp.pth",
+                            test_loader)
         if load_cnn:
-            model_name = "CNN"
-            weights = torch.load(os.path.join(abs_path, "cnn.pth"), map_location=device)
-            model = CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1)
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_load_test("CNN", 
+                            CNNetRegression(image_resize, 1, use_batch_norm=batch_size > 1),
+                            "cnn.pth",
+                            test_loader)
         if load_vgg:
-            model_name = "VGG16"
-            weights = torch.load(os.path.join(abs_path, "vgg16.pth"), map_location=device)
-            model = RegressionModel(base_model=vgg.vgg16(in_chans=1))
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_load_test("VGG16", 
+                            RegressionModel(base_model=vgg.vgg16(in_chans=1)),
+                            "vgg16.pth",
+                            test_loader)
         if load_resnet:
-            model_name = "ResNet50"
-            weights = torch.load(os.path.join(abs_path, "resnet50.pth"), map_location=device)
-            model = RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3)))
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_load_test("ResNet50", 
+                            RegressionModel(base_model=resnet.ResNet(block=resnet.BasicBlock, in_chans=1, layers=(3, 4, 6, 3))),
+                            "resnet50.pth",
+                            test_loader)
         if load_vit:
-            model_name = "ViT-tiny-patch16"
-            weights = torch.load(os.path.join(abs_path, "vit-tiny-patch16.pth"), map_location=device)
-            model = RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3))
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
-
+            model_load_test("ViT-tiny-patch16", 
+                            RegressionModel(base_model=vision_transformer.VisionTransformer(img_size=image_resize, in_chans=1, patch_size=16, embed_dim=192, depth=12, num_heads=3)),
+                            "vit-tiny-patch16.pth",
+                            test_loader)
         if load_fastvit:
-            model_name = "FastViT-SA12"
-            weights = torch.load(os.path.join(abs_path, "fastvit-sa12.pth"), map_location=device)
-            model = RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate))
-
-            model = model.to(device)
-
-            model.load_state_dict(weights)
-            test_model(model=model, test_loader=test_loader, specifier=model_name)
+            model_load_test("FastViT-SA12", 
+                            RegressionModel(base_model=fastvit.FastVit(in_chans=1, layers=(2, 2, 6, 2), embed_dims=(64, 128, 256, 512), mlp_ratios=(4, 4, 4, 4), token_mixers=("repmixer", "repmixer", "repmixer", "attention"), drop_rate=drop_rate)),
+                            "fastvit-sa12.pth",
+                            test_loader)
 
     if plot_losses:
         graph_losses(losses_df)
@@ -791,7 +749,6 @@ def main():
     if do_explain:
         explainability(train_set)
 
-    
 
 if __name__ == "__main__":
     main()
