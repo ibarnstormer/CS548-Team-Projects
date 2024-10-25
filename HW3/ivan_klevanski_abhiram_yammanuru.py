@@ -611,11 +611,24 @@ def explainability(ds: ImageDataSet):
     model = model.to(torch.device("cpu"))
 
     model.load_state_dict(weights)
+
+    # Create dataloader to be able to retrieve single images / labels for examples
+    dl = DataLoader(ds, batch_size=1)
     
     # Visualization of convolution filters (note: just conv1 since subsequent have a color dimension exceeding 3)
     conv1_kernels = model.conv1.weight.data
-
     visualize_tensor(conv1_kernels, "Visualization of kernels for layer: conv1")
+
+    # Visualization of convolution procedure
+    image_tensor, label = next(iter(dl))
+
+    visualize_tensor(image_tensor, "Original Image")
+    visualize_tensor(conv1_kernels[0], "First Convolutional Filter from conv1")
+
+    convolved_image = model.conv1(image_tensor)
+    single_convolved = torch.index_select(convolved_image, 1, torch.tensor([0]))
+
+    visualize_tensor(single_convolved, "Image after applying filter")
 
 
     # LIME Implementation
@@ -651,17 +664,17 @@ def main():
     validation_loader = DataLoader(validation_set, shuffle=True, batch_size=batch_size)
     test_loader = DataLoader(test_set, shuffle=True, batch_size=batch_size)
 
-    do_explain = False # Run explainability analysis
+    do_explain = True # Run explainability analysis
     test_only = False # Whether or not to just run model tests or to train models as well
-    plot_losses = True
-    save_losses = True
+    plot_losses = False
+    save_losses = False
     
-    load_mlp = True
-    load_cnn = True
-    load_vgg = True
-    load_resnet = True
-    load_vit = True
-    load_fastvit = True
+    load_mlp = False
+    load_cnn = False
+    load_vgg = False
+    load_resnet = False
+    load_vit = False
+    load_fastvit = False
 
     # Model Training and evaluation
 
