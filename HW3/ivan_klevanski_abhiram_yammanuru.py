@@ -27,6 +27,7 @@ import torch.cuda
 import torch.utils
 import torch.utils.data
 import torchvision
+import torchsummary
 import albumentations
 import albumentations.pytorch
 import torch.nn.functional as F
@@ -606,6 +607,9 @@ def explainability(ds: ImageDataSet):
 
     model.load_state_dict(weights)
 
+    # Print model details
+    torchsummary.summary(model, (1, 48, 48), device="cpu")
+
     model.eval()
 
     # Create dataloader to be able to retrieve single images / labels for examples
@@ -616,7 +620,7 @@ def explainability(ds: ImageDataSet):
     visualize_tensor(conv1_kernels, "Visualization of kernels for layer: conv1")
 
     # Visualization of convolution procedure
-    image_tensor, label = next(iter(dl))
+    image_tensor, _ = next(iter(dl))
 
     visualize_tensor(image_tensor, "Original Image")
     visualize_tensor(conv1_kernels[0], "First Convolutional Filter from conv1")
@@ -633,8 +637,29 @@ def explainability(ds: ImageDataSet):
     attributions = gradcam.attribute(inputs=image_tensor, target = 0)
 
     plt.imshow(np.transpose(image_tensor.squeeze(0).numpy(), (1, 2, 0)))
-    plt.imshow(np.transpose(attributions.detach().squeeze(0).numpy(), (1, 2, 0)), cmap="magma", alpha=0.75)
+    plt.imshow(np.transpose(attributions.detach().squeeze(0).numpy(), (1, 2, 0)), cmap="plasma_r", alpha=0.75)
+    plt.colorbar(orientation="vertical")
     plt.title("Grad-Cam for conv1")
+    plt.show()
+
+    gradcam = LayerGradCam(model, model.conv2)
+
+    attributions = gradcam.attribute(inputs=image_tensor, target = 0)
+
+    plt.imshow(np.transpose(image_tensor.squeeze(0).numpy(), (1, 2, 0)))
+    plt.imshow(np.transpose(attributions.detach().squeeze(0).numpy(), (1, 2, 0)), cmap="plasma", alpha=0.75)
+    plt.colorbar(orientation="vertical")
+    plt.title("Grad-Cam for conv2")
+    plt.show()
+
+    gradcam = LayerGradCam(model, model.conv3)
+
+    attributions = gradcam.attribute(inputs=image_tensor, target = 0)
+
+    plt.imshow(np.transpose(image_tensor.squeeze(0).numpy(), (1, 2, 0)))
+    plt.imshow(np.transpose(attributions.detach().squeeze(0).numpy(), (1, 2, 0)), cmap="plasma", alpha=0.75)
+    plt.colorbar(orientation="vertical")
+    plt.title("Grad-Cam for conv3")
     plt.show()
 
 
