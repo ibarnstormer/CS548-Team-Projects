@@ -36,12 +36,12 @@ from torch.utils.data import Dataset
 from timm import utils
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+from captum.attr import LayerGradCam
 
 from timm.models import vgg
 from timm.models import resnet
 from timm.models import vision_transformer
 from timm.models import fastvit
-from lime import lime_image
 
 warnings.filterwarnings("ignore")
 
@@ -593,15 +593,9 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
         visualize_image(ds)
 
 
-def data_preprocessing():
-    # TODO: note: may not be necessary since most image augmentations will happen in dataset class
-    pass
-
-
 def explainability(ds: ImageDataSet):
     """
     Provides an interpretation on how the image regressors make their predictions
-
     """
 
     # Load CNN to use as example
@@ -611,6 +605,8 @@ def explainability(ds: ImageDataSet):
     model = model.to(torch.device("cpu"))
 
     model.load_state_dict(weights)
+
+    model.eval()
 
     # Create dataloader to be able to retrieve single images / labels for examples
     dl = DataLoader(ds, batch_size=1)
@@ -630,11 +626,17 @@ def explainability(ds: ImageDataSet):
 
     visualize_tensor(single_convolved, "Image after applying filter")
 
+    # GradCam for conv1 layer
 
-    # LIME Implementation
+    gradcam = LayerGradCam(model, model.conv1)
 
+    attributions = gradcam.attribute(inputs=image_tensor, target = 0)
 
-    pass
+    plt.imshow(np.transpose(image_tensor.squeeze(0).numpy(), (1, 2, 0)))
+    plt.imshow(np.transpose(attributions.detach().squeeze(0).numpy(), (1, 2, 0)), cmap="magma", alpha=0.75)
+    plt.title("Grad-Cam for conv1")
+    plt.show()
+
 
 
 def main():
