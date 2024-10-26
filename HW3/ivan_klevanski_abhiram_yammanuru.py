@@ -48,7 +48,7 @@ warnings.filterwarnings("ignore")
 
 abs_path = os.path.dirname(os.path.abspath(__file__))
 
-plot_eda_graphs = False
+plot_eda_graphs = True
 
 # Params
 
@@ -233,10 +233,6 @@ def load_data():
 
     # Oversampling for vertical image flip
     df["oversample"] = 0
-    oversample_df = df.copy()
-
-    oversample_df["oversample"] = 1
-    df = pd.concat([df, oversample_df], ignore_index=True)
     
     # Format pixels and age to float32 and shuffle dataframe
     df["pixels"] = df["pixels"].apply(lambda img: np.array(img.split(' '), dtype=np.float32))
@@ -247,6 +243,23 @@ def load_data():
     train_df, test_df = skl_ms.train_test_split(df, test_size=0.2)
     train_df, validation_df = skl_ms.train_test_split(train_df, test_size=0.15)
 
+    # Continue oversampling
+    oversample_train_df = train_df.copy()
+    oversample_train_df["oversample"] = 1
+    train_df = pd.concat([train_df, oversample_train_df], ignore_index=True)
+    train_df = train_df.sample(frac=1).reset_index(drop=True)
+
+    oversample_validation_df = validation_df.copy()
+    oversample_validation_df["oversample"] = 1
+    validation_df = pd.concat([validation_df, oversample_validation_df], ignore_index=True)
+    validation_df = validation_df.sample(frac=1).reset_index(drop=True)
+
+    oversample_test_df = test_df.copy()
+    oversample_test_df["oversample"] = 1
+    test_df = pd.concat([test_df, oversample_test_df], ignore_index=True)
+    test_df = test_df.sample(frac=1).reset_index(drop=True)
+
+    # Create image datasets for PyTorch
     train_set = ImageDataSet(train_df["pixels"].tolist(), train_df["oversample"].tolist(), train_df["age"].tolist())
     validation_set = ImageDataSet(validation_df["pixels"].tolist(), validation_df["oversample"].tolist(), validation_df["age"].tolist())
     test_set = ImageDataSet(test_df["pixels"].tolist(), test_df["oversample"].tolist(), test_df["age"].tolist())
@@ -521,16 +534,14 @@ def graph_losses(df: pd.DataFrame):
         plt.show()
 
 
-def visualize_image(ds: ImageDataSet, batch_size: int = 16, idx: int = 0):
+def visualize_image(dl: DataLoader, idx: int = 0):
     """
     Visualizes a mini-batch of images from the dataset used by the neural networks
 
-    **ds**: ImageDataSet object<br>
-    **batch_size**: Equivalent to how much images to display<br>
+    **dl**: DataLoader for ImageDataset object<br>
     **idx**: Index for dataloader<br>
     """
 
-    dl = DataLoader(ds, batch_size=batch_size)
     it = iter(dl)
     i = -1
 
@@ -544,7 +555,7 @@ def visualize_image(ds: ImageDataSet, batch_size: int = 16, idx: int = 0):
 
 """ ------ Project Tasks ------ """
 
-def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
+def EDA(ds: ImageDataSet):
     """
     Performs Exploratory Data Analysis (EDA) on the image dataset.
     """
@@ -556,13 +567,26 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
     print("DataFrame Head: {}".format(imageData.head()))
     print("Shape: {}\n".format(imageData.shape))
 
+    # Get common metrics / central tendency values
+    print(imageData.describe())
+
+    # NaN rows
+    print("Number of incomplete / NaN records:\n{}".format(imageData.isnull().sum()))
+
+    # Duplicated rows
+    print("Number of duplicated records: {}".format(imageData.duplicated().sum()))
+
+    # Number of unique entries per feature:
+    print("Unique values per feature:\n{}".format(imageData.nunique()))
+
     if plot_eda_graphs:
 
         # Plotting the distribution of Age 
-        vcs = imageData['age'].value_counts()
-        vcs.plot(kind="bar")
-        for idx in vcs.index:
-            plt.text(idx, vcs[idx], vcs[idx], ha="center", va="center")
+        _, bins, bars = plt.hist(imageData["age"], bins=10)
+        plt.title("Age distribution")
+        plt.xlabel("Age in years")
+        plt.bar_label(bars)
+        plt.xticks(bins)
         plt.show()
 
         # Plotting the distribution of Gender 
@@ -570,6 +594,7 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
         vcs1.plot(kind="bar")
         for idx in vcs1.index:
             plt.text(idx, vcs1[idx], vcs1[idx], ha="center", va="center")
+        plt.title("Gender distribution")
         plt.show()
 
         # Plotting the distribution of Ethnicity 
@@ -577,21 +602,32 @@ def EDA(formattedDF: pd.DataFrame, ds: ImageDataSet):
         vcs2.plot(kind="bar")
         for idx in vcs2.index:
             plt.text(idx, vcs2[idx], vcs2[idx], ha="center", va="center")
-
-        # Seeing the correlation between Age and Gender 
-        sns.scatterplot(x=imageData["age"], y=imageData["gender"])
         plt.show()
 
-        # Seeing the correlation between Gender and Ethnicity 
-        sns.scatterplot(x=imageData["gender"], y=imageData["ethnicity"])
+        # Distribution of Age w.r.t. Gender
+        sns.boxplot(x="gender", y="age", data=imageData)
+        plt.title("Age distribution w.r.t. Gender")
         plt.show()
-            
-        # Seeing the corrlation between Age and Ethnicity
-        sns.scatterplot(x=imageData["age"], y=imageData["ethnicity"])
+
+        # Distribution of Ethnicity w.r.t. Gender
+        sns.boxplot(x="gender", y="ethnicity", data=imageData)
+        plt.title("Ethnicity distribution w.r.t. Gender")
         plt.show()
+
+        # Distribution of Age w.r.t. Ethnicity
+        sns.boxplot(x="ethnicity", y="age", data=imageData)
+        plt.title("Age distribution w.r.t. Ethnicity")
+        plt.show()
+
+        # Visualize images
+        dl_single = DataLoader(ds, shuffle=True, batch_size=1)
+        dl_batch = DataLoader(ds, shuffle=True, batch_size=32)
+
+        # Example of a single image
+        visualize_image(dl_single)
 
         # Example of image mini-batch
-        visualize_image(ds)
+        visualize_image(dl_batch)
 
 
 def explainability(ds: ImageDataSet):
@@ -671,7 +707,7 @@ def main():
     df, train_set, validation_set, test_set = load_data()
     
     # EDA
-    EDA(df, train_set)
+    EDA(train_set)
 
     losses_df = pd.DataFrame(columns=["Model_Name", "Training_Losses", "Validation_Losses"])
 
@@ -693,15 +729,15 @@ def main():
 
     do_explain = True # Run explainability analysis
     test_only = False # Whether or not to just run model tests or to train models as well
-    plot_losses = False
-    save_losses = False
+    plot_losses = True
+    save_losses = True
     
-    load_mlp = False
-    load_cnn = False
-    load_vgg = False
-    load_resnet = False
-    load_vit = False
-    load_fastvit = False
+    load_mlp = True
+    load_cnn = True
+    load_vgg = True
+    load_resnet = True
+    load_vit = True
+    load_fastvit = True
 
     # Model Training and evaluation
 
