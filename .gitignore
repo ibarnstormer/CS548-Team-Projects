@@ -12,6 +12,7 @@
 
 # Datasets
 *.csv
+*.json
 
 # Models
 *.pth
