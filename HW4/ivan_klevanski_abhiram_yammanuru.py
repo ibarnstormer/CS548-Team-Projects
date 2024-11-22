@@ -11,204 +11,253 @@ directory as the source file
 
 """
 
-
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import copy
 import os
-import random
-import traceback
-import time
-import sklearn.metrics as skl_m
-import sklearn.model_selection as skl_ms
-import torch.nn as nn
-import torch.cuda
-import torch.utils
-import torch.utils.data
-import torchsummary
-import torchvision
-import albumentations
-import albumentations.pytorch
-import torch.nn.functional as F
+import sys
+import surprise
+import sklearn.preprocessing as skl_pp
 import warnings
 
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from surprise import NMF, SVD, KNNBasic
 from tqdm.auto import tqdm
-from captum.attr import LayerGradCam
 
+warnings.filterwarnings("ignore")
 
-""" ------ Datasets and Models ------ """
-
-class SteamGamesDataset(Dataset):
-    def __init__(self, df: pd.DataFrame):
-        self.data = df
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data["e_uid"][idx], self.data["e_gid"][idx], self.data["f_rating"][idx]
-
-
-class MLPNet(nn.Module):
-    """
-    Multi-Layer Perceptron for Neural Collaborative Filtering\n
-    Based on: https://arxiv.org/abs/1708.05031
-    """
-
-    def __init__(self, num_items, num_users, embedding_dim, drop_rate: float):
-        super(MLPNet, self).__init__()
-
-        self.ilv_embedding = nn.Embedding(num_items, embedding_dim)
-        self.ulv_embedding = nn.Embedding(num_users, embedding_dim)
-
-        mlp_input_size = embedding_dim * 2
-
-        self.mlp = nn.Sequential(
-            nn.Linear(mlp_input_size, int(mlp_input_size / 2)),
-            nn.ReLU(),
-            nn.Dropout(drop_rate),
-            nn.Linear(int(mlp_input_size / 2), int(mlp_input_size / 4)),
-            nn.ReLU(),
-            nn.Dropout(drop_rate),
-            nn.Linear(int(mlp_input_size / 4), int(mlp_input_size / 8)),
-            nn.ReLU(),
-            nn.Dropout(drop_rate),
-            nn.Linear(int(mlp_input_size / 8), int(mlp_input_size / 16)),
-            nn.ReLU(),
-            nn.Dropout(drop_rate),
-            nn.Linear(int(mlp_input_size / 16), int(mlp_input_size / 32)),
-            nn.ReLU(),
-            nn.Dropout(drop_rate)
-        )
-
-        self.linear = nn.Linear(int(mlp_input_size / 32), int(mlp_input_size / 48))
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, item_vec, user_vec):
-        concat_embed = torch.concat((self.ilv_embedding(item_vec), self.ulv_embedding(user_vec)), -1)
-        output = self.mlp(concat_embed)
-
-        return self.sigmoid(self.linear(output))
-
-
-class GMFNet(nn.Module):
-    """
-    Generalized Matrix Factorization\n
-    Based on: https://arxiv.org/abs/1708.05031
-    """
-
-    def __init__(self, num_items, num_users, embedding_dim):
-        super(GMFNet, self).__init__()
-
-        self.ilv_embedding = nn.Embedding(num_items, embedding_dim)
-        self.ulv_embedding = nn.Embedding(num_users, embedding_dim)
-
-        self.linear = nn.Linear(embedding_dim, embedding_dim)
-        self.sigmoid = nn.Sigmoid()
-    
-    def forward(self, item_vec, user_vec):
-        dp = self.ilv_embedding(item_vec) * self.ulv_embedding(user_vec)
-
-        return self.sigmoid(self.linear(dp))
-
-
-class NeuMFNet(nn.Module):
-    """
-    Neural Matrix Factorization Model\n
-    Based on: https://arxiv.org/abs/1708.05031
-    """
-
-    def __init__(self, pretrained_mlp: MLPNet, pretrained_gmf: GMFNet, mlp_dim: int, gmf_dim: int):
-        super(NeuMFNet, self).__init__()
-
-        nmf_linear_input = mlp_dim + gmf_dim
-
-        self.mlp = pretrained_mlp
-        self.gmf = pretrained_gmf
-
-        self.linear = nn.Linear(nmf_linear_input, 1)
-        self.sigmoid = nn.Sigmoid()
-
-    
-    def forward(self, item_vec, user_vec):
-        mlp = self.mlp(item_vec, user_vec)
-        gmf = self.gmf(item_vec, user_vec)
-        concat_embed = torch.concat((gmf, mlp), -1)
-
-        return self.sigmoid(self.linear(concat_embed))
-    
+abs_path = os.path.dirname(os.path.abspath(__file__))
 
 """ ------ Internal Methods ------ """
 
-# Deep Learning models
 
-def train_mlp():
-    pass
+def load_csvs():
+    i = 0
 
-def test_mlp():
-    pass
+    stat = "[Info]: Loading Datasets: {} / 3"
+    sys.stdout.write(f"\r{stat.format(i)}")
 
-def train_gmf():
-    pass
+    games_df = pd.read_csv(os.path.join(abs_path, "games.csv"))
+    i += 1
+    sys.stdout.write(f"\r{stat.format(i)}")
 
-def test_gmf():
-    pass
+    recs_df = pd.read_csv(os.path.join(abs_path, "recommendations.csv"))
+    i += 1
+    sys.stdout.write(f"\r{stat.format(i)}")
 
-def train_neumf():
-    pass
+    users_df = pd.read_csv(os.path.join(abs_path, "users.csv"))
+    i += 1
+    sys.stdout.write(f"\r{stat.format(i)}\n")
 
-def test_neumf():
-    pass
+    print("[Info]: Finished loading data\n")
 
-def neumf_inference():
-    pass
+    return games_df, users_df, recs_df
 
-# Regular ML models
-
-def train_xgboost():
-    pass
-
-def test_xgboost():
-    pass
-
-def xgboost_inference():
-    pass
-
-def train_KNN():
-    pass
-
-def test_KNN():
-    pass
-
-def KNN_inference():
-    pass
+def lookup_game_by_encoded_ID(id: int, df: pd.DataFrame):
+    return df.loc[df["item"] == id]["title"].iloc[0]
 
 
 """ ------ Specific Task Methods ------ """
 
-def EDA():
+def EDA(games_df: pd.DataFrame, users_df: pd.DataFrame, recs_df: pd.DataFrame):
+    print("[Info]: EDA")
+
+    # Check number of duplicates and missing rows
+    dup = recs_df.duplicated().sum()
+    print(f"[Info]: duplicate reviews: {dup}")
+    na_num = recs_df.isna().sum()
+    print(f"[Info]: missing entry reviews: {na_num}")
+
+    # TODO Finish
+
     pass
 
-def preprocess_df():
-    pass
+def preprocess_df(df: pd.DataFrame, users_df: pd.DataFrame, games_df: pd.DataFrame):
 
-def model_training():
-    pass
+    print("[Info]: Preprocessing DataFrame")
 
-def evaluation():
-    pass
+    # Drop irrelevant columns that won't be used
+    print("[Info]: Dropping irrelevant features")
+    df.drop(columns=["helpful", "funny", "date", "hours"], inplace=True)
+
+    # Some individuals gave only a small number of reviews, get top 100 reviewers with the most reviews
+    print("[Info]: Sampling DataFrame")
+
+    top_most_reviewed_games = df["app_id"].value_counts().nlargest(200)
+    top_users = users_df.nlargest(200, "reviews")
+
+    uid_encoder = skl_pp.LabelEncoder()
+    top_users["e_u_id"] = uid_encoder.fit_transform(top_users["user_id"])
+
+    df = pd.merge(df, top_users, how="inner", on="user_id")
+    df = pd.merge(df, top_most_reviewed_games, how="inner", on="app_id")
+
+    # One-Hot Encode target feature
+    print("[Info]: Encoding Features")
+    df["is_recommended"] = df["is_recommended"].astype(float)
+
+    # For each game that does not have a review for a particular user set to default value
+    print("[Info]: Adding missing reviews")
+    no_reviews_list = []
+    unique_games = df["app_id"].unique()
+    unique_users = df["e_u_id"].unique()
+
+    for aid in tqdm(unique_games):
+        for uid in unique_users:
+            r = df.loc[(df["e_u_id"] == uid) & (df["app_id"] == aid)]
+            if r.size == 0:
+                # Other fields aren't important, just need to set the relevant ones: encoded user id, app id, and recommended to 0.5 (between no 0 and yes 1)
+                no_reviews_dict = {"e_u_id": uid, 
+                                   "app_id": aid, 
+                                   "is_recommended": 0.5,
+                                   "review_id": 0, 
+                                   "user_id": 0,
+                                   "products": 0,
+                                   "reviews": 0}
+                no_reviews_list.append(no_reviews_dict)
+
+    df = pd.concat([df, pd.DataFrame(no_reviews_list)]).reset_index().apply(lambda x: x.sample(frac=1))
+
+    aid_encoder = skl_pp.LabelEncoder()
+
+    df["e_a_id"] = aid_encoder.fit_transform(df["app_id"])
+
+    # Drop additional columns
+
+
+
+    print("[Info]: Finished Preprocessing\n")
+
+    return df
 
 """ ------ Driver code ------ """
 
 def main():
+    # Load data
+    games_df, users_df, recs_df = load_csvs()
+
+
+    # EDA
+    do_eda = False
+    if do_eda:
+        EDA(games_df, users_df, recs_df)
+
+    # Data Preprocessing
+    recs_df = preprocess_df(recs_df, users_df, games_df)
+
+    # Create implicit ratings (recommended * average game rating)
+    print("[Info]: Feature Engineering")
+    recs_df = pd.merge(recs_df, games_df, how="inner", on="app_id")
+    recs_df["impl_rating"] = recs_df["is_recommended"] * recs_df["positive_ratio"]
+    recs_df["impl_rating"] = recs_df["impl_rating"].astype(np.float32)
+
+    # Model training & evaluation
+    """
+    Optimizations:
+
+    Cross Validation
+    Feature Engineering: convert is_recommended to continuous variable (based on game percent ratio)
+    Cross Validation + Feature Engineering
+
+    Note: perform optimizations manually
+    """
+
+    as_regression = True # Use Feature Engineering / implicit ratings
+    use_cv = True
+
+    print("[Info]: Setting up Scikit-Surprise objects")
+
+    if not as_regression:
+        recs_df = recs_df.rename(columns={"e_u_id": "user", "e_a_id": "item", "rating": "rating_old", "is_recommended": "rating"})
+    else:
+        recs_df = recs_df.rename(columns={"e_u_id": "user", "e_a_id": "item", "rating": "rating_old", "impl_rating": "rating"})
+
+    recs_df.reset_index(inplace=True)
+
+    reader = surprise.Reader(rating_scale=(0, 100) if as_regression else (0, 1))
+    dataset = surprise.Dataset.load_from_df(recs_df[["user", "item", "rating"]], reader=reader)
+
+    train_ds, test_ds = surprise.model_selection.train_test_split(dataset, test_size=0.2)
+
+    # Non-Negative Matrix Factorization
+    nmf = NMF(n_factors=200)
+
+    if use_cv:
+        print("\n[Info]: CV results for NMF:")
+        surprise.model_selection.cross_validate(nmf, data=dataset, measures=["mse", "rmse", "mae", "fcp"], cv=10, verbose=True)
+    else:
+        nmf.fit(train_ds)
+        pred = nmf.test(test_ds)
+
+        print("\n[Info]: NMF: MSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mse(pred, False)))
+        print("[Info]: NMF: RMSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.rmse(pred, False)))
+        print("[Info]: NMF: MAE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mae(pred, False)))
+        print("[Info]: NMF: FCP of predicted vs original ratings: {:.4f}".format(surprise.accuracy.fcp(pred, False)))
+
+
+    # Singular Value Decomposition
+    svd = SVD(n_factors=10)
+
+    if use_cv:
+        print("\n[Info]: CV results for SVD:")
+        surprise.model_selection.cross_validate(svd, data=dataset, measures=["mse", "rmse", "mae", "fcp"], cv=10, verbose=True)
+    else:
+        svd.fit(train_ds)
+        pred = svd.test(test_ds)
+
+        print("\n[Info]: SVD: MSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mse(pred, False)))
+        print("[Info]: SVD: RMSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.rmse(pred, False)))
+        print("[Info]: SVD: MAE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mae(pred, False)))
+        print("[Info]: SVD: FCP of predicted vs original ratings: {:.4f}".format(surprise.accuracy.fcp(pred, False)))
+
+
+    # KNN
+    knn = KNNBasic(k=2, verbose=False)
+
+    if use_cv:
+        print("\n[Info]: CV results for KNN:")
+        surprise.model_selection.cross_validate(knn, data=dataset, measures=["mse", "rmse", "mae", "fcp"], cv=10, verbose=True)
+    else:
+        knn.fit(train_ds)
+        pred = knn.test(test_ds)
+
+        print("\n[Info]: KNN: MSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mse(pred, False)))
+        print("[Info]: KNN: RMSE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.rmse(pred, False)))
+        print("[Info]: KNN: MAE of predicted vs original ratings: {:.4f}".format(surprise.accuracy.mae(pred, False)))
+        print("[Info]: KNN: FCP of predicted vs original ratings: {:.4f}".format(surprise.accuracy.fcp(pred, False)))
+
+
+    # Explainability (Inference runs) -> SHAP and LIME are incompatible with scikit-surprise
+
+    print("\n[Info]: Explainability")
+    
+    # Get predictions for arbitrary user and item
+    nmf_pred = nmf.predict(uid=100, iid=1)
+    svd_pred = svd.predict(uid=100, iid=1)
+    knn_pred = knn.predict(uid=100, iid=1)
+
+    game_name = lookup_game_by_encoded_ID(1, recs_df)
+
+    print("\n[Info]: NMF: Rating prediction for user 100 for item 1 ({}): {:.4f}".format(game_name, nmf_pred.est))
+    print("[Info]: SVD: Rating prediction for user 100 for item 1 ({}): {:.4f}".format(game_name, svd_pred.est))
+    print("[Info]: KNN: Rating prediction for user 100 for item 1 ({}): {:.4f}".format(game_name, knn_pred.est))
+
+    # Get top 10 unlisted recommendations for each model for user 100
+
+    all_nmf = np.array([[x.est, x.r_ui, x.iid] for x in nmf.test(test_ds) if x.uid == 100])
+    all_svd = np.array([[x.est, x.r_ui, x.iid] for x in svd.test(test_ds) if x.uid == 100])
+    all_knn = np.array([[x.est, x.r_ui, x.iid] for x in knn.test(test_ds) if x.uid == 100])
+
+    top10_nmf = np.flip(all_nmf[np.argsort(all_nmf[:, 0])[-10:]], axis=0)
+    top10_svd = np.flip(all_svd[np.argsort(all_svd[:, 0])[-10:]], axis=0)
+    top10_knn = np.flip(all_knn[np.argsort(all_knn[:, 0])[-10:]], axis=0)
+
+    for k, v in {"NMF": top10_nmf, "SVD": top10_svd, "KNN": top10_knn}.items():
+        print(f"\n[Info]: Top 10 predicted ratings for {k} for user 100:")
+        for est, _, id in v:
+            print("    Rating: {:.4f} for {}".format(est, lookup_game_by_encoded_ID(id, recs_df)))
+    
     pass
-
-
-
 
 if __name__ == "__main__":
     main()
