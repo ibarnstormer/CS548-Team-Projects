@@ -122,10 +122,6 @@ def preprocess_df(df: pd.DataFrame, users_df: pd.DataFrame, games_df: pd.DataFra
 
     df["e_a_id"] = aid_encoder.fit_transform(df["app_id"])
 
-    # Drop additional columns
-
-
-
     print("[Info]: Finished Preprocessing\n")
 
     return df
