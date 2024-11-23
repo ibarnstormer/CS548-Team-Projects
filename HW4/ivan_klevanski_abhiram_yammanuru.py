@@ -82,9 +82,9 @@ def EDA(games_df: pd.DataFrame, users_df: pd.DataFrame, recs_df: pd.DataFrame):
 
     # Check number of duplicates and missing rows for recommendations
     dup = recs_df.duplicated().sum()
-    print(f"[Info]: duplicate reviews: {dup}")
+    print(f"[Info]: duplicate reviews: \n{dup}")
     na_num = recs_df.isna().sum()
-    print(f"[Info]: missing entry reviews: {na_num}")
+    print(f"[Info]: missing entry reviews: \n{na_num}")
 
     # Correlation Heatmap of games and recommendations
     df_games_numeric = games_df.select_dtypes(include=np.number)
