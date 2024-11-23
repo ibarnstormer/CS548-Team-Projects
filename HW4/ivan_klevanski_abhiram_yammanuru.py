@@ -62,13 +62,68 @@ def lookup_game_by_encoded_ID(id: int, df: pd.DataFrame):
 def EDA(games_df: pd.DataFrame, users_df: pd.DataFrame, recs_df: pd.DataFrame):
     print("[Info]: EDA")
 
-    # Check number of duplicates and missing rows
+    # Housekeeping: Print heads and shapes for each dataframe
+    print("[Info]: Head and shape for games dataframe")
+    print(games_df.head())
+    print(f"Shape: {games_df.shape}")
+
+    print("[Info]: Head and shape for users dataframe")
+    print(users_df.head())
+    print(f"Shape: {users_df.shape}")
+
+    print("[Info]: Head and shape for recommendations dataframe")
+    print(recs_df.head())
+    print(f"Shape: {recs_df.shape}")
+
+    # Unique values
+    print("[Info]: Unique values per feature for games dataframe:\n{}".format(games_df.nunique()))
+    print("[Info]: Unique values per feature for users dataframe:\n{}".format(users_df.nunique()))
+    print("[Info]: Unique values per feature for recommendations dataframe:\n{}".format(recs_df.nunique()))
+
+    # Check number of duplicates and missing rows for recommendations
     dup = recs_df.duplicated().sum()
     print(f"[Info]: duplicate reviews: {dup}")
     na_num = recs_df.isna().sum()
     print(f"[Info]: missing entry reviews: {na_num}")
 
-    # TODO Finish
+    # Correlation Heatmap of games and recommendations
+    df_games_numeric = games_df.select_dtypes(include=np.number)
+    sns.heatmap(df_games_numeric.corr())
+    plt.show()
+
+    df_recs_numeric = recs_df.select_dtypes(include=np.number)
+    sns.heatmap(df_recs_numeric.corr())
+    plt.show()
+
+    # Distributions of variables for games and recommendations
+    df_games_numeric.hist(figsize=(25, 25))
+    plt.show()
+
+    df_recs_numeric.hist(figsize=(25, 25))
+    plt.show()
+
+    # Distribution of positive and negative reviews
+    recs_df["is_recommended"].value_counts().plot(kind="bar")
+    plt.show()
+
+    plot_boxes = False # These take a long time to run
+    if plot_boxes:
+        games_recs_df = pd.merge(recs_df, games_df, how="inner", on="app_id")
+        
+        # Recommended vs price
+        print("[Info]: Boxplot for is_recommended and price_final")
+        sns.boxplot(x="is_recommended", y="price_final", data=games_recs_df)
+        plt.show()
+
+        # Recommended vs user reviews count
+        print("[Info]: Boxplot for is_recommended and user_reviews")
+        sns.boxplot(x="is_recommended", y="user_reviews", data=games_recs_df)
+        plt.show()
+        
+        # Recommended vs positive ratio
+        print("[Info]: Boxplot for is_recommended and positive_ratio")
+        sns.boxplot(x="is_recommended", y="positive_ratio", data=games_recs_df)
+        plt.show()
 
     pass
 
@@ -119,7 +174,6 @@ def preprocess_df(df: pd.DataFrame, users_df: pd.DataFrame, games_df: pd.DataFra
     df = pd.concat([df, pd.DataFrame(no_reviews_list)]).reset_index().apply(lambda x: x.sample(frac=1))
 
     aid_encoder = skl_pp.LabelEncoder()
-
     df["e_a_id"] = aid_encoder.fit_transform(df["app_id"])
 
     print("[Info]: Finished Preprocessing\n")
@@ -134,7 +188,7 @@ def main():
 
 
     # EDA
-    do_eda = False
+    do_eda = True
     if do_eda:
         EDA(games_df, users_df, recs_df)
 
